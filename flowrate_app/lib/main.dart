@@ -63,7 +63,7 @@ class HomeScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text(
-              'Current Flow Rate',
+              'Current Blood Velocity',
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
