@@ -81,7 +81,7 @@ class HomeScreen extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
                 child: const Text(
-                  '0.0 ms⁻²',
+                  '0.0 ms⁻¹',
                   style: TextStyle(
                     fontSize: 26,
                     color: Colors.grey,
