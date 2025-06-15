@@ -146,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF2A0406),
       body: SafeArea(
         child: Center(
           child: _artboard == null
@@ -173,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     Positioned(
-                      bottom: 20,
+                      bottom: -45, // moved down by 65px from original 20
                       left: 0,
                       right: 0,
                       child: SizedBox(
