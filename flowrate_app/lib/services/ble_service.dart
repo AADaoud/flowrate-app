@@ -1,9 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
 import '../models/app_ble_status.dart';
+import '../models/telemetry_reading.dart';
 
+/// BLE helper focused on reliability and compact JSON parsing.
+///
+/// Keeps a running buffer to handle fragmented packets (<20 bytes) and will
+/// automatically rescan/reconnect with small backoff to avoid reconnect storms.
 class BleVelocityService {
   final FlutterReactiveBle _ble = FlutterReactiveBle();
 
@@ -24,22 +31,32 @@ class BleVelocityService {
   final _batteryController = StreamController<int>.broadcast();
   Stream<int> get batteryStream => _batteryController.stream;
 
+  final _telemetryController = StreamController<TelemetryReading>.broadcast();
+  Stream<TelemetryReading> get telemetryStream => _telemetryController.stream;
+
   StreamSubscription<DiscoveredDevice>? _scanSub;
   StreamSubscription<ConnectionStateUpdate>? _connSub;
   StreamSubscription<List<int>>? _notifySub;
 
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+
   /// JSON packets may arrive split → buffer until valid JSON appears
   String _jsonBuffer = "";
+
+  bool _isShuttingDown = false;
 
   // ================================================================
   // START SCAN
   // ================================================================
   void start() {
+    _isShuttingDown = false;
     _emit(const AppBleStatus(
         AppBleStage.scanning, "Scanning for ESP32-Flow..."));
 
+    _scanSub?.cancel();
     _scanSub = _ble
-        .scanForDevices(withServices: [])
+        .scanForDevices(withServices: [serviceUuid])
         .listen((dev) {
       if (dev.name == "ESP32-Flow") {
         device = dev;
@@ -49,6 +66,7 @@ class BleVelocityService {
       }
     }, onError: (e) {
       _emit(AppBleStatus(AppBleStage.error, "Scan error: $e"));
+      _retryWithBackoff();
     });
   }
 
@@ -56,18 +74,21 @@ class BleVelocityService {
   // CONNECT
   // ================================================================
   void _connect() {
-    if (device == null) return;
+    if (device == null || _isShuttingDown) return;
 
-    _emit(const AppBleStatus(AppBleStage.connecting, "Connecting..."));
+    _emit(AppBleStatus(
+        AppBleStage.connecting, "Connecting to ${device!.name}..."));
 
+    _connSub?.cancel();
     _connSub = _ble
         .connectToDevice(
       id: device!.id,
-      connectionTimeout: const Duration(seconds: 6),
+      connectionTimeout: const Duration(seconds: 8),
     )
         .listen((update) {
       switch (update.connectionState) {
         case DeviceConnectionState.connected:
+          _reconnectAttempts = 0;
           _emit(const AppBleStatus(AppBleStage.connected, "Connected"));
           _subscribe();
           break;
@@ -75,7 +96,7 @@ class BleVelocityService {
         case DeviceConnectionState.disconnected:
           _emit(const AppBleStatus(
               AppBleStage.disconnected, "Disconnected"));
-          Future.delayed(const Duration(seconds: 1), start);
+          _retryWithBackoff();
           break;
 
         default:
@@ -83,6 +104,7 @@ class BleVelocityService {
       }
     }, onError: (e) {
       _emit(AppBleStatus(AppBleStage.error, "Connect error: $e"));
+      _retryWithBackoff();
     });
   }
 
@@ -90,7 +112,7 @@ class BleVelocityService {
   // SUBSCRIBE TO NUS NOTIFY CHARACTERISTIC
   // ================================================================
   void _subscribe() {
-    if (device == null) return;
+    if (device == null || _isShuttingDown) return;
 
     final q = QualifiedCharacteristic(
       deviceId: device!.id,
@@ -101,6 +123,7 @@ class BleVelocityService {
     _emit(const AppBleStatus(
         AppBleStage.notifying, "Receiving data..."));
 
+    _notifySub?.cancel();
     _notifySub = _ble.subscribeToCharacteristic(q).listen((bytes) {
       _handleIncomingBytes(bytes);
     }, onError: (e) {
@@ -111,42 +134,61 @@ class BleVelocityService {
   // ================================================================
   // HANDLE JSON STREAM (supports fragmented BLE packets)
   // ================================================================
-void _handleIncomingBytes(List<int> bytes) {
-  print("BYTES: $bytes");
+  void _handleIncomingBytes(List<int> bytes) {
+    if (bytes.isEmpty) return;
 
-  final part = utf8.decode(bytes, allowMalformed: true);
-  print("STRING CHUNK: $part");
+    // Keep buffer small to avoid runaway memory usage on malformed streams.
+    if (_jsonBuffer.length > 120) {
+      _jsonBuffer = "";
+    }
 
-  _jsonBuffer += part;
+    final part = utf8.decode(bytes, allowMalformed: true);
+    _jsonBuffer += part;
 
-  while (true) {
-    final start = _jsonBuffer.indexOf('{');
-    final end = _jsonBuffer.indexOf('}');
+    while (true) {
+      final start = _jsonBuffer.indexOf('{');
+      final end = _jsonBuffer.indexOf('}');
 
-    if (start != -1 && end != -1 && end > start) {
-      final jsonStr = _jsonBuffer.substring(start, end + 1);
-      print("JSON FRAGMENT: $jsonStr");
+      if (start != -1 && end != -1 && end > start) {
+        final jsonStr = _jsonBuffer.substring(start, end + 1);
+        _jsonBuffer = _jsonBuffer.substring(end + 1);
 
-      _jsonBuffer = _jsonBuffer.substring(end + 1);
+        try {
+          final map = jsonDecode(jsonStr);
+          final velocity = (map["v"] as num?)?.toDouble();
+          final battery = (map["b"] as num?)?.toInt();
 
-      try {
-        final map = jsonDecode(jsonStr);
-        print("PARSED JSON: $map");
+          if (velocity == null || battery == null) continue;
 
-        _velocityController.add((map["v"] as num).toDouble());
-        _batteryController.add((map["b"] as num).toInt());
+          final reading = TelemetryReading(
+            velocity: velocity,
+            battery: battery,
+            timestamp: DateTime.now(),
+            rssi: lastRssi,
+          );
 
-      } catch (e) {
-        print("JSON PARSE ERROR: $e");
-        print("BUFFER AFTER ERROR: $_jsonBuffer");
+          _telemetryController.add(reading);
+          _velocityController.add(velocity);
+          _batteryController.add(battery);
+        } catch (e) {
+          if (kDebugMode) {
+            print("JSON parse error: $e for chunk $jsonStr");
+          }
+        }
+      } else {
+        break;
       }
-
-    } else {
-      break;
     }
   }
-}
 
+  void _retryWithBackoff() {
+    if (_isShuttingDown) return;
+
+    _reconnectAttempts = (_reconnectAttempts + 1).clamp(1, 6);
+    final delay = Duration(seconds: 1 * _reconnectAttempts);
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, start);
+  }
 
   void _emit(AppBleStatus s) {
     _statusController.add(s);
@@ -156,11 +198,14 @@ void _handleIncomingBytes(List<int> bytes) {
   // CLEANUP
   // ================================================================
   void dispose() {
+    _isShuttingDown = true;
+    _reconnectTimer?.cancel();
     _scanSub?.cancel();
     _connSub?.cancel();
     _notifySub?.cancel();
     _statusController.close();
     _velocityController.close();
     _batteryController.close();
+    _telemetryController.close();
   }
 }

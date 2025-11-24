@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../../models/velocity_sample.dart';
+import '../models/velocity_sample.dart';
 
 class HistoryScreen extends StatelessWidget {
   final List<VelocitySample> samples;

@@ -58,8 +58,8 @@ class DeviceInfoScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Notification payload (JSON):\n'
-                    '{ "velocity": <double>, "battery": <int 0-100> }',
+                    'Notification payload (<20 bytes JSON):\n'
+                    '{ "v": <double>, "b": <int 0-100> }',
                   ),
                 ],
               ),
