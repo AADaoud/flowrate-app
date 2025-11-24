@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' as m; // or any prefix you want
 
 class VelocityCard extends StatelessWidget {
   const VelocityCard({
@@ -22,7 +23,7 @@ class VelocityCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: const m.LinearGradient(
           colors: [Color(0xFF1E1F35), Color(0xFF181926)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,

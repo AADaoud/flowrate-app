@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' as m; // or any prefix you want
 
 class BatteryChip extends StatelessWidget {
   final int? battery;
@@ -28,7 +29,7 @@ class BatteryChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
+        gradient: m.LinearGradient(
           colors: [
             tone.withOpacity(0.18),
             Colors.white.withOpacity(0.06),

@@ -13,7 +13,7 @@ class AppBleStatus {
   final String message;
   final DateTime timestamp;
 
-  const AppBleStatus(this.stage, this.message, {DateTime? timestamp})
+  AppBleStatus(this.stage, this.message, {DateTime? timestamp})
       : timestamp = timestamp ?? DateTime.now();
 
   bool get isError => stage == AppBleStage.error;

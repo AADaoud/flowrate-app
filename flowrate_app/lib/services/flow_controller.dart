@@ -34,7 +34,7 @@ class FlowController extends ChangeNotifier {
   final VelocityFilter _filter = VelocityFilter(windowSize: 6);
 
   AppBleStatus status =
-      const AppBleStatus(AppBleStage.idle, 'Waiting to start BLE');
+      AppBleStatus(AppBleStage.idle, 'Waiting to start BLE');
   FlowReading? latest;
   bool loggingEnabled = true;
   bool devMode = false;

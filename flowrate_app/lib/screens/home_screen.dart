@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' as m;
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:rive/rive.dart';
@@ -205,156 +206,166 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF12142A), Color(0xFF0E101C)],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                ),
-              ),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: m.LinearGradient(
+              colors: [Color(0xFF12142A), Color(0xFF0E101C)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
             ),
-            if (artboard == null)
-              const Center(child: CircularProgressIndicator())
-            else
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Rive(
-                    artboard: artboard,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          ),
+          child: Stack(
+            children: [
+              SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Flow Velocity Sensor',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
-                            ),
+                      // Top status bar
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          BatteryChip(battery: battery),
+                          const SizedBox(width: 10),
+                          BleStatusBar(status: status),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      // Rive Animation Card
+                      Container(
+  height: 200,
+  decoration: BoxDecoration(
+    color: Colors.white.withOpacity(0.06),
+    borderRadius: BorderRadius.circular(20),
+    border: Border.all(color: Colors.white.withOpacity(0.08)),
+  ),
+  clipBehavior: Clip.antiAlias,
+  child: Padding(
+    padding: const EdgeInsets.only(top: 160), // 👈 shifts animation down
+    child: artboard == null
+        ? const Center(child: CircularProgressIndicator())
+        : Rive(
+            artboard: artboard,
+            fit: BoxFit.cover,
+          ),
+  ),
+),
+                      const SizedBox(height: 16),
+                      
+                      // Velocity Card
+                      VelocityCard(
+                        velocity: velocity,
+                        samples: _sparkline(),
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      // Info tiles
+                      Row(
+                        children: [
+                          _InfoTile(
+                            label: 'RSSI',
+                            value: '${_controller.ble.lastRssi ?? 0} dBm',
+                            icon: Icons.network_ping,
                           ),
-                          SizedBox(height: 4),
-                          Text(
-                            'BLE + ESP32 demo',
-                            style: TextStyle(color: Colors.white70),
+                          const SizedBox(width: 12),
+                          _InfoTile(
+                            label: 'Last packet',
+                            value: _controller.lastReadingReceived == null
+                                ? '—'
+                                : _timeAgo(_controller.lastReadingReceived!),
+                            icon: Icons.schedule,
+                          ),
+                          const SizedBox(width: 12),
+                          _InfoTile(
+                            label: 'Battery',
+                            value: '${battery ?? 0}%',
+                            icon: Icons.bolt,
                           ),
                         ],
                       ),
-                      const Spacer(),
-                      BatteryChip(battery: battery),
-                      const SizedBox(width: 10),
-                      BleStatusBar(status: status),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  VelocityCard(
-                    velocity: velocity,
-                    samples: _sparkline(),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      _InfoTile(
-                        label: 'RSSI',
-                        value: '${_controller.ble.lastRssi ?? 0} dBm',
-                        icon: Icons.network_ping,
+                      const SizedBox(height: 20),
+                      
+                      // Action chips
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          _chipAction(
+                            icon: Icons.refresh,
+                            label: 'Rescan',
+                            onTap: () => _controller.ble.reset(),
+                          ),
+                          _chipAction(
+                            icon: Icons.timeline,
+                            label: 'History',
+                            onTap: _openHistory,
+                          ),
+                          _chipAction(
+                            icon: Icons.tune,
+                            label: 'Calibrate',
+                            onTap: _openCalibration,
+                          ),
+                          _chipAction(
+                            icon: Icons.settings,
+                            label: 'Settings',
+                            onTap: _openSettings,
+                          ),
+                          _chipAction(
+                            icon: Icons.info_outline,
+                            label: 'Device info',
+                            onTap: _openDeviceInfo,
+                          ),
+                          if (_controller.devMode)
+                            _chipAction(
+                              icon: Icons.bug_report,
+                              label: 'Debug overlay',
+                              onTap: _toggleDebug,
+                            ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      _InfoTile(
-                        label: 'Last packet',
-                        value: _controller.lastReadingReceived == null
-                            ? '—'
-                            : _timeAgo(_controller.lastReadingReceived!),
-                        icon: Icons.schedule,
-                      ),
-                      const SizedBox(width: 12),
-                      _InfoTile(
-                        label: 'Battery',
-                        value: '${battery ?? 0}%',
-                        icon: Icons.bolt,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _chipAction(
-                        icon: Icons.refresh,
-                        label: 'Rescan',
-                        onTap: _controller.startBle,
-                      ),
-                      _chipAction(
-                        icon: Icons.timeline,
-                        label: 'History',
-                        onTap: _openHistory,
-                      ),
-                      _chipAction(
-                        icon: Icons.tune,
-                        label: 'Calibrate',
-                        onTap: _openCalibration,
-                      ),
-                      _chipAction(
-                        icon: Icons.settings,
-                        label: 'Settings',
-                        onTap: _openSettings,
-                      ),
-                      _chipAction(
-                        icon: Icons.info_outline,
-                        label: 'Device info',
-                        onTap: _openDeviceInfo,
-                      ),
-                      if (_controller.devMode)
-                        _chipAction(
-                          icon: Icons.bug_report,
-                          label: 'Debug overlay',
-                          onTap: _toggleDebug,
+                      const SizedBox(height: 20),
+                      
+                      // Status message
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          status.message,
+                          style: const TextStyle(
+                            color: Colors.white60,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
+                      ),
+                      const SizedBox(height: 16),
                     ],
-                  ),
-                  const Spacer(),
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: Text(
-                      status.message,
-                      style: const TextStyle(color: Colors.white60),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (_controller.devMode && _showDebugOverlay)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() => _showDebugOverlay = false);
-                  },
-                  child: DebugOverlay(
-                    deviceName: _controller.ble.device?.name ?? 'Unknown',
-                    deviceId: _controller.ble.device?.id ?? '-',
-                    velocity: velocity,
-                    battery: battery,
-                    rssi: _controller.ble.lastRssi,
-                    lastStatus: status.toString(),
-                    error: status.isError ? status.message : '',
                   ),
                 ),
               ),
-          ],
+              
+              // Debug overlay
+              if (_controller.devMode && _showDebugOverlay)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() => _showDebugOverlay = false);
+                    },
+                    child: DebugOverlay(
+                      deviceName: _controller.ble.device?.name ?? 'Unknown',
+                      deviceId: _controller.ble.device?.id ?? '-',
+                      velocity: velocity,
+                      battery: battery,
+                      rssi: _controller.ble.lastRssi,
+                      lastStatus: status.toString(),
+                      error: status.isError ? status.message : '',
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -410,14 +421,19 @@ class _InfoTile extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
                 Icon(icon, size: 18, color: Colors.white70),
                 const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -428,6 +444,8 @@ class _InfoTile extends StatelessWidget {
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),

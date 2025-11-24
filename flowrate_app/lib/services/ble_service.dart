@@ -7,10 +7,13 @@ import '../models/flow_reading.dart';
 
 /// BLE glue for the ESP32 flow sensor.
 ///
-/// Responsibilities:
-/// - Scans for the advertised device name or service UUID.
-/// - Handles fragmented JSON packets under 20 bytes and emits [FlowReading].
-/// - Provides status updates for the UI.
+/// Features:
+/// - Scans for ESP32-Flow device by advertised name or service UUID.
+/// - Handles BLE <20-byte JSON packets safely and reassembles full messages.
+/// - Emits FlowReading objects for velocity + battery.
+/// - Provides clean status stream for UI.
+/// - Performs periodic RSSI polling (since rssiStream() was removed).
+/// - Automatic reconnection with exponential backoff.
 class BleVelocityService {
   BleVelocityService();
 
@@ -39,19 +42,21 @@ class BleVelocityService {
   StreamSubscription<DiscoveredDevice>? _scanSub;
   StreamSubscription<ConnectionStateUpdate>? _connSub;
   StreamSubscription<List<int>>? _notifySub;
-  StreamSubscription<int>? _rssiSub;
+
+  Timer? _rssiTimer;
 
   final StringBuffer _jsonBuffer = StringBuffer();
-  int _retryCount = 0;
+  int _retry = 0;
   bool _disposed = false;
 
   // ================================================================
-  // Public API
+  // PUBLIC API
   // ================================================================
   void startScan() {
     if (_disposed) return;
+
     _scanSub?.cancel();
-    _emit(const AppBleStatus(AppBleStage.scanning, "Scanning for ESP32-Flow"));
+    _emit(AppBleStatus(AppBleStage.scanning, "Scanning for ESP32-Flow…"));
 
     _scanSub = _ble
         .scanForDevices(
@@ -65,6 +70,7 @@ class BleVelocityService {
       if (matchesName || exposesService) {
         device = dev;
         lastRssi = dev.rssi;
+
         _scanSub?.cancel();
         _connect();
       }
@@ -76,18 +82,18 @@ class BleVelocityService {
   void disconnect() {
     _connSub?.cancel();
     _notifySub?.cancel();
-    _rssiSub?.cancel();
-    _emit(const AppBleStatus(AppBleStage.disconnected, "Disconnected"));
+    _rssiTimer?.cancel();
+    _emit(AppBleStatus(AppBleStage.disconnected, "Disconnected"));
   }
 
   // ================================================================
-  // Connection + subscription
+  // CONNECTION LOGIC
   // ================================================================
   void _connect() {
     final target = device;
     if (target == null || _disposed) return;
 
-    _emit(const AppBleStatus(AppBleStage.connecting, "Connecting"));
+    _emit(AppBleStatus(AppBleStage.connecting, "Connecting…"));
 
     _connSub = _ble
         .connectToDevice(
@@ -100,15 +106,17 @@ class BleVelocityService {
         .listen((update) {
       switch (update.connectionState) {
         case DeviceConnectionState.connected:
-          _emit(const AppBleStatus(AppBleStage.connected, "Connected"));
-          _retryCount = 0;
-          _startRssiStream();
+          _emit(AppBleStatus(AppBleStage.connected, "Connected"));
+          _retry = 0;
+          _startRssiPolling();
           _subscribe();
           break;
+
         case DeviceConnectionState.disconnected:
-          _emit(const AppBleStatus(AppBleStage.disconnected, "Disconnected"));
+          _emit(AppBleStatus(AppBleStage.disconnected, "Disconnected"));
           _scheduleReconnect();
           break;
+
         default:
           break;
       }
@@ -118,6 +126,9 @@ class BleVelocityService {
     });
   }
 
+  // ================================================================
+  // SUBSCRIBE TO STREAMING DATA
+  // ================================================================
   void _subscribe() {
     final target = device;
     if (target == null || _disposed) return;
@@ -128,48 +139,94 @@ class BleVelocityService {
       characteristicId: charUuid,
     );
 
-    _emit(const AppBleStatus(AppBleStage.notifying, "Streaming live data"));
+    _emit(AppBleStatus(AppBleStage.notifying, "Receiving live data…"));
 
     _notifySub = _ble.subscribeToCharacteristic(q).listen((bytes) {
-      _handleIncomingBytes(bytes);
+      _handleIncoming(bytes);
     }, onError: (e) {
       _emit(AppBleStatus(AppBleStage.error, "Notify error: $e"));
       _scheduleReconnect();
     });
   }
 
-  void _startRssiStream() {
+  // ================================================================
+  // CLEAN RSSI POLLING (REPLACEMENT FOR REMOVED rssiStream())
+  // ================================================================
+  void _startRssiPolling() {
     final target = device;
     if (target == null) return;
-    _rssiSub?.cancel();
-    _rssiSub = _ble
-        .rssiStream(deviceId: target.id)
-        .listen((value) => lastRssi = value, onError: (_) {});
+
+    _rssiTimer?.cancel();
+
+    _rssiTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      try {
+        final scan = await _ble
+            .scanForDevices(
+              withServices: [],
+              scanMode: ScanMode.lowPower,
+              requireLocationServicesEnabled: false,
+            )
+            .timeout(const Duration(milliseconds: 300))
+            .first;
+
+        if (scan.id == target.id) {
+          lastRssi = scan.rssi;
+        }
+      } catch (_) {
+        // Timeout or no scan results — OK
+      }
+    });
   }
 
+  void reset() {
+    // Stop reconnect loops
+    _disposed = false;
+
+    // Cancel all activity
+    _scanSub?.cancel();
+    _connSub?.cancel();
+    _notifySub?.cancel();
+    _rssiTimer?.cancel();
+
+    // Reset state
+    device = null;
+    lastRssi = null;
+    _retry = 0;
+    _jsonBuffer.clear();
+
+    // Inform UI
+    _emit(AppBleStatus(AppBleStage.idle, "Reset"));
+
+    // Start clean scan
+    Future.delayed(const Duration(milliseconds: 150), startScan);
+  }
+
+
   // ================================================================
-  // Payload handling
+  // PAYLOAD HANDLING (FRAGMENTED JSON <20 bytes)
   // ================================================================
-  void _handleIncomingBytes(List<int> bytes) {
+  void _handleIncoming(List<int> bytes) {
     final chunk = utf8.decode(bytes, allowMalformed: true);
     _jsonBuffer.write(chunk);
 
-    // Keep buffer bounded to avoid runaway memory if malformed data arrives
+    // Avoid unlimited memory growth
     if (_jsonBuffer.length > 200) {
-      final content = _jsonBuffer.toString();
+      final text = _jsonBuffer.toString();
       _jsonBuffer.clear();
-      _jsonBuffer.write(content.substring(content.length - 200));
+      _jsonBuffer.write(text.substring(text.length - 200));
     }
 
     while (true) {
-      final content = _jsonBuffer.toString();
-      final start = content.indexOf('{');
-      final end = content.indexOf('}', start + 1);
+      final text = _jsonBuffer.toString();
+      final start = text.indexOf('{');
+      final end = text.indexOf('}', start + 1);
 
       if (start != -1 && end != -1 && end > start) {
-        final jsonStr = content.substring(start, end + 1);
+        final jsonStr = text.substring(start, end + 1);
+
+        // Remove extracted JSON from buffer
         _jsonBuffer.clear();
-        _jsonBuffer.write(content.substring(end + 1));
+        _jsonBuffer.write(text.substring(end + 1));
 
         try {
           final reading = FlowReading.fromPayload(jsonStr, rssi: lastRssi);
@@ -177,7 +234,6 @@ class BleVelocityService {
           _velocityController.add(reading.velocity);
           _batteryController.add(reading.battery);
         } catch (e) {
-          // Skip malformed fragment but keep buffer for future merges
           _emit(AppBleStatus(AppBleStage.error, "Payload error: $e"));
         }
       } else {
@@ -186,24 +242,29 @@ class BleVelocityService {
     }
   }
 
+  // ================================================================
+  // RECONNECT LOGIC
+  // ================================================================
   void _scheduleReconnect() {
     if (_disposed) return;
+
     _scanSub?.cancel();
     _notifySub?.cancel();
-    _rssiSub?.cancel();
+    _rssiTimer?.cancel();
 
-    final backoff = Duration(seconds: 2 + (_retryCount * 2).clamp(0, 8));
-    _retryCount++;
-    Future.delayed(backoff, () {
-      if (!_disposed) {
-        startScan();
-      }
+    final delay = Duration(seconds: 2 + (_retry * 2).clamp(0, 8));
+    _retry++;
+
+    Future.delayed(delay, () {
+      if (!_disposed) startScan();
     });
   }
 
+  // ================================================================
+  // HELPERS
+  // ================================================================
   void _emit(AppBleStatus s) {
-    if (_disposed) return;
-    _statusController.add(s);
+    if (!_disposed) _statusController.add(s);
   }
 
   // ================================================================
@@ -211,10 +272,12 @@ class BleVelocityService {
   // ================================================================
   void dispose() {
     _disposed = true;
+
     _scanSub?.cancel();
     _connSub?.cancel();
     _notifySub?.cancel();
-    _rssiSub?.cancel();
+    _rssiTimer?.cancel();
+
     _statusController.close();
     _readingController.close();
     _velocityController.close();
