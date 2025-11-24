@@ -5,7 +5,18 @@
 // CONFIGURATION
 // ==========================================================
 
-bool useAdc = false;
+// Flip this to true when wiring up real sensors/ADC inputs.
+#ifndef USE_ADC
+#define USE_ADC false
+#endif
+
+// Simulation flavours for demos without hardware
+#define SIM_MODE_SINE 0
+#define SIM_MODE_STEP 1
+#define SIM_MODE_BURST 2
+#ifndef SIMULATION_MODE
+#define SIMULATION_MODE SIM_MODE_SINE
+#endif
 
 const int ADC_VELOCITY_PIN = 34;
 const int ADC_BATTERY_PIN = 35;
@@ -23,28 +34,64 @@ NimBLECharacteristic* pCharacteristic;
 // SENSOR FUNCTIONS
 // ==========================================================
 
-int dummyCounter = 0;
+float simulateVelocity() {
+    static float phase = 0.0f;
+    phase += 0.25f;
+
+    switch (SIMULATION_MODE) {
+        case SIM_MODE_STEP:
+            return fmod(phase, 20.0f) > 10.0f ? 55.0f : 15.0f;
+        case SIM_MODE_BURST:
+            return fmod(phase, 30.0f) > 25.0f ? 95.0f : 12.0f;
+        case SIM_MODE_SINE:
+        default:
+            return 45.0f + 25.0f * sin(phase / 10.0f);
+    }
+}
 
 float readVelocity() {
-    if (!useAdc) {
-        dummyCounter += 3;
-        return dummyCounter;
+    if (!USE_ADC) {
+        return simulateVelocity();
     }
 
     int raw = analogRead(ADC_VELOCITY_PIN);
     float v = (raw / 4095.0f) * 3.3f;
-    return v * 25.0f;
+    return v * 25.0f; // scale to cm/s
 }
 
 int readBatteryPercent() {
-    int raw = analogRead(ADC_BATTERY_PIN);
-    float vin = (raw / 4095.0f) * 3.3f * BATTERY_DIVIDER_RATIO;
+    // Slight smoothing so the UI does not jitter
+    static float filtered = 92.0f;
 
-    if (vin < BATTERY_EMPTY_VOLTAGE) return 0;
-    if (vin > BATTERY_FULL_VOLTAGE) return 100;
+    float samplePercent;
+    if (USE_ADC) {
+        int raw = analogRead(ADC_BATTERY_PIN);
+        float vin = (raw / 4095.0f) * 3.3f * BATTERY_DIVIDER_RATIO;
 
-    return (int)(100.0f * (vin - BATTERY_EMPTY_VOLTAGE) /
-                 (BATTERY_FULL_VOLTAGE - BATTERY_EMPTY_VOLTAGE));
+        if (vin < BATTERY_EMPTY_VOLTAGE) {
+            samplePercent = 0.0f;
+        } else if (vin > BATTERY_FULL_VOLTAGE) {
+            samplePercent = 100.0f;
+        } else {
+            samplePercent = 100.0f * (vin - BATTERY_EMPTY_VOLTAGE) /
+                            (BATTERY_FULL_VOLTAGE - BATTERY_EMPTY_VOLTAGE);
+        }
+    } else {
+        // Slowly decay then bounce back to emulate discharge/charge cycles
+        const float minPercent = 35.0f;
+        const float maxPercent = 99.0f;
+        static bool rising = false;
+
+        if (filtered <= minPercent) rising = true;
+        if (filtered >= maxPercent) rising = false;
+
+        samplePercent = filtered + (rising ? 0.4f : -0.25f);
+    }
+
+    filtered = (filtered * 0.92f) + (samplePercent * 0.08f);
+    if (filtered < 0) filtered = 0;
+    if (filtered > 100) filtered = 100;
+    return (int)filtered;
 }
 
 // ==========================================================
@@ -52,11 +99,11 @@ int readBatteryPercent() {
 // ==========================================================
 
 class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* pServer) {
+    void onConnect(NimBLEServer* pServer) override {
         Serial.println("[BLE] Client connected");
     }
 
-    void onDisconnect(NimBLEServer* pServer) {
+    void onDisconnect(NimBLEServer* pServer) override {
         Serial.println("[BLE] Client disconnected → restarting advertising");
         NimBLEDevice::startAdvertising();
     }
@@ -89,7 +136,6 @@ void setup() {
 
     service->start();
 
-    // -------- Advertising
     NimBLEAdvertisementData advData;
     advData.setName("ESP32-Flow");
     advData.setCompleteServices(SERVICE_UUID);
@@ -107,15 +153,15 @@ void setup() {
 
 void loop() {
     static unsigned long last = 0;
-    if (millis() - last >= 1000) {
+    if (millis() - last >= 800) { // a little faster for smoother UI
         last = millis();
 
         float vel = readVelocity();
         int batt  = readBatteryPercent();
 
+        // Compact JSON under 20 bytes: {"v":12.3,"b":95}
         char json[32];
-        snprintf(json, sizeof(json),
-                "{\"v\":%.0f,\"b\":%d}", vel, batt);
+        snprintf(json, sizeof(json), "{\"v\":%.1f,\"b\":%d}", vel, batt);
 
         pCharacteristic->setValue((uint8_t*)json, strlen(json));
         pCharacteristic->notify();

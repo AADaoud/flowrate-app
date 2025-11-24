@@ -3,8 +3,20 @@ import 'dart:convert';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
 import '../models/app_ble_status.dart';
+import '../models/flow_reading.dart';
 
+/// BLE glue for the ESP32 flow sensor.
+///
+/// Features:
+/// - Scans for ESP32-Flow device by advertised name or service UUID.
+/// - Handles BLE <20-byte JSON packets safely and reassembles full messages.
+/// - Emits FlowReading objects for velocity + battery.
+/// - Provides clean status stream for UI.
+/// - Performs periodic RSSI polling (since rssiStream() was removed).
+/// - Automatic reconnection with exponential backoff.
 class BleVelocityService {
+  BleVelocityService();
+
   final FlutterReactiveBle _ble = FlutterReactiveBle();
 
   final serviceUuid =
@@ -18,6 +30,9 @@ class BleVelocityService {
   final _statusController = StreamController<AppBleStatus>.broadcast();
   Stream<AppBleStatus> get statusStream => _statusController.stream;
 
+  final _readingController = StreamController<FlowReading>.broadcast();
+  Stream<FlowReading> get readingStream => _readingController.stream;
+
   final _velocityController = StreamController<double>.broadcast();
   Stream<double> get velocityStream => _velocityController.stream;
 
@@ -28,22 +43,34 @@ class BleVelocityService {
   StreamSubscription<ConnectionStateUpdate>? _connSub;
   StreamSubscription<List<int>>? _notifySub;
 
-  /// JSON packets may arrive split → buffer until valid JSON appears
-  String _jsonBuffer = "";
+  Timer? _rssiTimer;
+
+  final StringBuffer _jsonBuffer = StringBuffer();
+  int _retry = 0;
+  bool _disposed = false;
 
   // ================================================================
-  // START SCAN
+  // PUBLIC API
   // ================================================================
-  void start() {
-    _emit(const AppBleStatus(
-        AppBleStage.scanning, "Scanning for ESP32-Flow..."));
+  void startScan() {
+    if (_disposed) return;
+
+    _scanSub?.cancel();
+    _emit(AppBleStatus(AppBleStage.scanning, "Scanning for ESP32-Flow…"));
 
     _scanSub = _ble
-        .scanForDevices(withServices: [])
+        .scanForDevices(
+          withServices: [serviceUuid],
+          scanMode: ScanMode.lowLatency,
+        )
         .listen((dev) {
-      if (dev.name == "ESP32-Flow") {
+      final matchesName = dev.name.trim().toLowerCase() == 'esp32-flow';
+      final exposesService = dev.serviceUuids.contains(serviceUuid);
+
+      if (matchesName || exposesService) {
         device = dev;
         lastRssi = dev.rssi;
+
         _scanSub?.cancel();
         _connect();
       }
@@ -52,30 +79,42 @@ class BleVelocityService {
     });
   }
 
+  void disconnect() {
+    _connSub?.cancel();
+    _notifySub?.cancel();
+    _rssiTimer?.cancel();
+    _emit(AppBleStatus(AppBleStage.disconnected, "Disconnected"));
+  }
+
   // ================================================================
-  // CONNECT
+  // CONNECTION LOGIC
   // ================================================================
   void _connect() {
-    if (device == null) return;
+    final target = device;
+    if (target == null || _disposed) return;
 
-    _emit(const AppBleStatus(AppBleStage.connecting, "Connecting..."));
+    _emit(AppBleStatus(AppBleStage.connecting, "Connecting…"));
 
     _connSub = _ble
         .connectToDevice(
-      id: device!.id,
-      connectionTimeout: const Duration(seconds: 6),
+      id: target.id,
+      connectionTimeout: const Duration(seconds: 8),
+      servicesWithCharacteristicsToDiscover: {
+        serviceUuid: [charUuid],
+      },
     )
         .listen((update) {
       switch (update.connectionState) {
         case DeviceConnectionState.connected:
-          _emit(const AppBleStatus(AppBleStage.connected, "Connected"));
+          _emit(AppBleStatus(AppBleStage.connected, "Connected"));
+          _retry = 0;
+          _startRssiPolling();
           _subscribe();
           break;
 
         case DeviceConnectionState.disconnected:
-          _emit(const AppBleStatus(
-              AppBleStage.disconnected, "Disconnected"));
-          Future.delayed(const Duration(seconds: 1), start);
+          _emit(AppBleStatus(AppBleStage.disconnected, "Disconnected"));
+          _scheduleReconnect();
           break;
 
         default:
@@ -83,83 +122,164 @@ class BleVelocityService {
       }
     }, onError: (e) {
       _emit(AppBleStatus(AppBleStage.error, "Connect error: $e"));
+      _scheduleReconnect();
     });
   }
 
   // ================================================================
-  // SUBSCRIBE TO NUS NOTIFY CHARACTERISTIC
+  // SUBSCRIBE TO STREAMING DATA
   // ================================================================
   void _subscribe() {
-    if (device == null) return;
+    final target = device;
+    if (target == null || _disposed) return;
 
     final q = QualifiedCharacteristic(
-      deviceId: device!.id,
+      deviceId: target.id,
       serviceId: serviceUuid,
       characteristicId: charUuid,
     );
 
-    _emit(const AppBleStatus(
-        AppBleStage.notifying, "Receiving data..."));
+    _emit(AppBleStatus(AppBleStage.notifying, "Receiving live data…"));
 
     _notifySub = _ble.subscribeToCharacteristic(q).listen((bytes) {
-      _handleIncomingBytes(bytes);
+      _handleIncoming(bytes);
     }, onError: (e) {
       _emit(AppBleStatus(AppBleStage.error, "Notify error: $e"));
+      _scheduleReconnect();
     });
   }
 
   // ================================================================
-  // HANDLE JSON STREAM (supports fragmented BLE packets)
+  // CLEAN RSSI POLLING (REPLACEMENT FOR REMOVED rssiStream())
   // ================================================================
-void _handleIncomingBytes(List<int> bytes) {
-  print("BYTES: $bytes");
+  void _startRssiPolling() {
+    final target = device;
+    if (target == null) return;
 
-  final part = utf8.decode(bytes, allowMalformed: true);
-  print("STRING CHUNK: $part");
+    _rssiTimer?.cancel();
 
-  _jsonBuffer += part;
-
-  while (true) {
-    final start = _jsonBuffer.indexOf('{');
-    final end = _jsonBuffer.indexOf('}');
-
-    if (start != -1 && end != -1 && end > start) {
-      final jsonStr = _jsonBuffer.substring(start, end + 1);
-      print("JSON FRAGMENT: $jsonStr");
-
-      _jsonBuffer = _jsonBuffer.substring(end + 1);
-
+    _rssiTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       try {
-        final map = jsonDecode(jsonStr);
-        print("PARSED JSON: $map");
+        final scan = await _ble
+            .scanForDevices(
+              withServices: [],
+              scanMode: ScanMode.lowPower,
+              requireLocationServicesEnabled: false,
+            )
+            .timeout(const Duration(milliseconds: 300))
+            .first;
 
-        _velocityController.add((map["v"] as num).toDouble());
-        _batteryController.add((map["b"] as num).toInt());
-
-      } catch (e) {
-        print("JSON PARSE ERROR: $e");
-        print("BUFFER AFTER ERROR: $_jsonBuffer");
+        if (scan.id == target.id) {
+          lastRssi = scan.rssi;
+        }
+      } catch (_) {
+        // Timeout or no scan results — OK
       }
+    });
+  }
 
-    } else {
-      break;
+  void reset() {
+    // Stop reconnect loops
+    _disposed = false;
+
+    // Cancel all activity
+    _scanSub?.cancel();
+    _connSub?.cancel();
+    _notifySub?.cancel();
+    _rssiTimer?.cancel();
+
+    // Reset state
+    device = null;
+    lastRssi = null;
+    _retry = 0;
+    _jsonBuffer.clear();
+
+    // Inform UI
+    _emit(AppBleStatus(AppBleStage.idle, "Reset"));
+
+    // Start clean scan
+    Future.delayed(const Duration(milliseconds: 150), startScan);
+  }
+
+
+  // ================================================================
+  // PAYLOAD HANDLING (FRAGMENTED JSON <20 bytes)
+  // ================================================================
+  void _handleIncoming(List<int> bytes) {
+    final chunk = utf8.decode(bytes, allowMalformed: true);
+    _jsonBuffer.write(chunk);
+
+    // Avoid unlimited memory growth
+    if (_jsonBuffer.length > 200) {
+      final text = _jsonBuffer.toString();
+      _jsonBuffer.clear();
+      _jsonBuffer.write(text.substring(text.length - 200));
+    }
+
+    while (true) {
+      final text = _jsonBuffer.toString();
+      final start = text.indexOf('{');
+      final end = text.indexOf('}', start + 1);
+
+      if (start != -1 && end != -1 && end > start) {
+        final jsonStr = text.substring(start, end + 1);
+
+        // Remove extracted JSON from buffer
+        _jsonBuffer.clear();
+        _jsonBuffer.write(text.substring(end + 1));
+
+        try {
+          final reading = FlowReading.fromPayload(jsonStr, rssi: lastRssi);
+          _readingController.add(reading);
+          _velocityController.add(reading.velocity);
+          _batteryController.add(reading.battery);
+        } catch (e) {
+          _emit(AppBleStatus(AppBleStage.error, "Payload error: $e"));
+        }
+      } else {
+        break;
+      }
     }
   }
-}
 
+  // ================================================================
+  // RECONNECT LOGIC
+  // ================================================================
+  void _scheduleReconnect() {
+    if (_disposed) return;
 
+    _scanSub?.cancel();
+    _notifySub?.cancel();
+    _rssiTimer?.cancel();
+
+    final delay = Duration(seconds: 2 + (_retry * 2).clamp(0, 8));
+    _retry++;
+
+    Future.delayed(delay, () {
+      if (!_disposed) startScan();
+    });
+  }
+
+  // ================================================================
+  // HELPERS
+  // ================================================================
   void _emit(AppBleStatus s) {
-    _statusController.add(s);
+    if (!_disposed) _statusController.add(s);
   }
 
   // ================================================================
   // CLEANUP
   // ================================================================
   void dispose() {
+    _disposed = true;
+
     _scanSub?.cancel();
     _connSub?.cancel();
     _notifySub?.cancel();
+    _rssiTimer?.cancel();
+
     _statusController.close();
+    _readingController.close();
     _velocityController.close();
     _batteryController.close();
   }

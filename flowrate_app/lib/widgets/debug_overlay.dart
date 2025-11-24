@@ -5,6 +5,7 @@ class DebugOverlay extends StatelessWidget {
   final String deviceId;
   final double velocity;
   final int? battery;
+  final int? rssi;
   final String lastStatus;
   final String error;
 
@@ -14,6 +15,7 @@ class DebugOverlay extends StatelessWidget {
     required this.deviceId,
     required this.velocity,
     required this.battery,
+    required this.rssi,
     required this.lastStatus,
     required this.error,
   });
@@ -21,13 +23,13 @@ class DebugOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black.withOpacity(0.8),
+      color: Colors.black.withOpacity(0.84),
       padding: const EdgeInsets.all(24),
       child: Center(
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white10,
+            color: Colors.white12,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: Colors.white30),
           ),
@@ -49,6 +51,7 @@ class DebugOverlay extends StatelessWidget {
                 Text('ID: $deviceId'),
                 Text('Velocity: ${velocity.toStringAsFixed(2)} cm/s'),
                 Text('Battery: ${battery ?? 0}%'),
+                Text('RSSI: ${rssi ?? 0} dBm'),
                 Text('Status: $lastStatus'),
                 Text('Error: ${error.isEmpty ? "None" : error}'),
                 const SizedBox(height: 12),
