@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../../models/velocity_sample.dart';
+import '../models/velocity_sample.dart';
 
 class HistoryScreen extends StatelessWidget {
   final List<VelocitySample> samples;
@@ -60,7 +60,12 @@ class HistoryScreen extends StatelessWidget {
                             spots: points,
                             isCurved: true,
                             barWidth: 3,
+                            color: theme.colorScheme.primary,
                             dotData: FlDotData(show: false),
+                            belowBarData: BarAreaData(
+                              show: true,
+                              color: theme.colorScheme.primary.withOpacity(0.18),
+                            ),
                           ),
                         ],
                       ),

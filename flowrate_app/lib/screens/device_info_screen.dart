@@ -58,8 +58,13 @@ class DeviceInfoScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Notification payload (JSON):\n'
-                    '{ "velocity": <double>, "battery": <int 0-100> }',
+                    'Notification payload (compressed JSON <20 bytes):\n'
+                    '{"v":<velocity_cm_per_s>,"b":<battery_percent>}',
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Tip: keep the device advertising as "ESP32-Flow" or with the service UUID above to allow auto-reconnect.',
+                    style: TextStyle(color: Colors.white70),
                   ),
                 ],
               ),

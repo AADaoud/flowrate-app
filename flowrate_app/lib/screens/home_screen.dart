@@ -1,21 +1,21 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:rive/rive.dart';
 
 import '../models/app_ble_status.dart';
-import '../../models/velocity_sample.dart';
+import '../models/flow_reading.dart';
+import '../models/velocity_sample.dart';
 import '../services/ble_service.dart';
-import '../../widgets/velocity_card.dart';
-import '../../widgets/ble_status_bar.dart';
-import '../../widgets/debug_overlay.dart';
-import '../../widgets/battery_chip.dart';
-import 'history_screen.dart';
+import '../services/flow_controller.dart';
+import '../widgets/battery_chip.dart';
+import '../widgets/ble_status_bar.dart';
+import '../widgets/debug_overlay.dart';
+import '../widgets/velocity_card.dart';
 import 'calibration_screen.dart';
-import 'settings_screen.dart';
 import 'device_info_screen.dart';
+import 'history_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,39 +25,55 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final BleVelocityService _ble = BleVelocityService();
-
-  final List<VelocitySample> _history = [];
-  double _velocity = 0;
-  int? _battery;
-  AppBleStatus _status =
-      const AppBleStatus(AppBleStage.scanning, 'Starting…');
-
-  bool _devMode = false;
-  bool _loggingEnabled = true;
-  bool _showDebugOverlay = false;
-  String _lastError = '';
-
+  late final FlowController _controller;
   Artboard? _artboard;
   SMIBool? _isFlowing;
-  StreamSubscription<double>? _velSub;
-  StreamSubscription<int?>? _batSub;
-  StreamSubscription<AppBleStatus>? _statusSub;
-  StreamSubscription<VelocitySample>? _historySub;
+
+  bool _showDebugOverlay = false;
+  FlowReading? _lastReadingFeedback;
+  AppBleStage _lastStage = AppBleStage.idle;
 
   @override
   void initState() {
     super.initState();
+    _controller = FlowController(BleVelocityService())
+      ..addListener(_handleControllerUpdate);
     _loadRive();
     _initPermissionsAndBle();
+  }
+
+  Future<void> _initPermissionsAndBle() async {
+    final granted = await _ensurePermissions();
+    if (granted) {
+      _controller.startBle();
+    }
+  }
+
+  Future<bool> _ensurePermissions() async {
+    final statuses = await [
+      Permission.location,
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+    ].request();
+
+    final granted = statuses.values.every((s) => s.isGranted);
+    if (!granted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bluetooth permissions are required to continue.'),
+          ),
+        );
+      }
+    }
+    return granted;
   }
 
   Future<void> _loadRive() async {
     final data = await rootBundle.load('assets/bloodflow.riv');
     final file = RiveFile.import(data);
     final art = file.mainArtboard;
-    final controller =
-        StateMachineController.fromArtboard(art, 'State Machine 1');
+    final controller = StateMachineController.fromArtboard(art, 'State Machine 1');
     if (controller != null) {
       art.addController(controller);
       _isFlowing = controller.findInput<bool>('isFlowing') as SMIBool?;
@@ -68,63 +84,47 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<void> _initPermissionsAndBle() async {
-    await _ensurePermissions();
-    _ble.start();
+  void _handleControllerUpdate() {
+    final status = _controller.status;
+    final reading = _controller.latest;
 
-    // ---- Listen to velocity updates ----
-    _velSub = _ble.velocityStream.listen((v) {
-      setState(() {
-        _velocity = v;
-        _updateFlowState();
+    if (reading != null) {
+      _updateFlowState(reading.velocity);
+      if (_controller.hapticsEnabled &&
+          (_lastReadingFeedback?.timestamp != reading.timestamp)) {
+        HapticFeedback.selectionClick();
+      }
+      if (_controller.soundEnabled &&
+          (_lastReadingFeedback?.timestamp != reading.timestamp)) {
+        SystemSound.play(SystemSoundType.click);
+      }
+      _lastReadingFeedback = reading;
+    }
 
-        if (_loggingEnabled) {
-          _history.add(VelocitySample(v));
-          if (_history.length > 300) {
-            _history.removeAt(0);
-          }
-        }
-      });
-    });
+    if (status.stage != _lastStage) {
+      if (_controller.hapticsEnabled && status.stage == AppBleStage.connected) {
+        HapticFeedback.mediumImpact();
+      } else if (_controller.hapticsEnabled && status.stage == AppBleStage.error) {
+        HapticFeedback.vibrate();
+      }
+      if (_controller.soundEnabled && status.stage == AppBleStage.connected) {
+        SystemSound.play(SystemSoundType.alert);
+      }
+      _lastStage = status.stage;
+    }
 
-    // ---- Listen to battery updates ----
-    _batSub = _ble.batteryStream.listen((b) {
-      setState(() {
-        _battery = b;
-      });
-    });
-
-    // ---- Listen to BLE status updates ----
-    _statusSub = _ble.statusStream.listen((AppBleStatus s) {
-      setState(() {
-        _status = s;
-        if (s.stage == AppBleStage.error) {
-          _lastError = s.message;
-        }
-      });
-    });
+    if (mounted) setState(() {});
   }
 
-  Future<void> _ensurePermissions() async {
-    await [
-      Permission.location,
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-    ].request();
-  }
-
-  void _updateFlowState() {
+  void _updateFlowState(double velocity) {
     if (_isFlowing == null) return;
-    _isFlowing!.value = _velocity > 10;
+    _isFlowing!.value = velocity > 5;
   }
 
   @override
   void dispose() {
-    _velSub?.cancel();
-    _batSub?.cancel();
-    _statusSub?.cancel();
-    _historySub?.cancel();
-    _ble.dispose();
+    _controller.removeListener(_handleControllerUpdate);
+    _controller.dispose();
     super.dispose();
   }
 
@@ -132,7 +132,9 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => HistoryScreen(samples: List.from(_history)),
+        builder: (_) => HistoryScreen(
+          samples: List<VelocitySample>.from(_controller.history),
+        ),
       ),
     );
   }
@@ -151,15 +153,14 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => SettingsScreen(
-          loggingEnabled: _loggingEnabled,
-          devMode: _devMode,
-          onLoggingChanged: (v) {
-            setState(() => _loggingEnabled = v);
-            if (!v) _history.clear();
-          },
-          onDevModeChanged: (v) {
-            setState(() => _devMode = v);
-          },
+          loggingEnabled: _controller.loggingEnabled,
+          devMode: _controller.devMode,
+          hapticsEnabled: _controller.hapticsEnabled,
+          soundEnabled: _controller.soundEnabled,
+          onLoggingChanged: (v) => _controller.toggleLogging(v),
+          onDevModeChanged: (v) => _controller.setDevMode(v),
+          onHapticsChanged: (v) => _controller.setHaptics(v),
+          onSoundChanged: (v) => _controller.setSound(v),
         ),
       ),
     );
@@ -169,8 +170,10 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            DeviceInfoScreen(ble: _ble, battery: _battery),
+        builder: (_) => DeviceInfoScreen(
+          ble: _controller.ble,
+          battery: _controller.latest?.battery,
+        ),
       ),
     );
   }
@@ -178,131 +181,176 @@ class _HomeScreenState extends State<HomeScreen> {
   void _toggleDebug() {
     setState(() {
       _showDebugOverlay = !_showDebugOverlay;
-      _devMode = true;
+      _controller.setDevMode(true);
     });
+  }
+
+  List<double> _sparkline() {
+    if (_controller.history.isEmpty) return [];
+    final history = _controller.history;
+    final startIndex = history.length > 60 ? history.length - 60 : 0;
+    return history
+        .sublist(startIndex)
+        .map((e) => e.value)
+        .toList(growable: false);
   }
 
   @override
   Widget build(BuildContext context) {
     final artboard = _artboard;
+    final reading = _controller.latest;
+    final velocity = reading?.velocity ?? 0;
+    final battery = reading?.battery;
+    final status = _controller.status;
 
     return Scaffold(
       body: SafeArea(
         child: Stack(
           children: [
-            // =======================
-            // Background Rive Animation
-            // =======================
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF12142A), Color(0xFF0E101C)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+            ),
             if (artboard == null)
               const Center(child: CircularProgressIndicator())
             else
-              Center(
-                child: AspectRatio(
-                  aspectRatio: 9 / 16,
+              Positioned.fill(
+                child: IgnorePointer(
                   child: Rive(
                     artboard: artboard,
                     fit: BoxFit.cover,
                   ),
                 ),
               ),
-
-            // =======================
-            // Velocity Card (ON TOP)
-            // =======================
-            Center(
-              child: VelocityCard(
-                velocity: _velocity,
-                isFlowing: _velocity > 10,
-              ),
-            ),
-
-            // =======================
-            // Top-right buttons
-            // =======================
-            SafeArea(
-              child: Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.settings, color: Colors.white),
-                        onPressed: _openSettings,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Flow Velocity Sensor',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'BLE + ESP32 demo',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.info, color: Colors.white),
-                        onPressed: _openDeviceInfo,
+                      const Spacer(),
+                      BatteryChip(battery: battery),
+                      const SizedBox(width: 10),
+                      BleStatusBar(status: status),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  VelocityCard(
+                    velocity: velocity,
+                    samples: _sparkline(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      _InfoTile(
+                        label: 'RSSI',
+                        value: '${_controller.ble.lastRssi ?? 0} dBm',
+                        icon: Icons.network_ping,
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.bug_report, color: Colors.white),
-                        onPressed: _toggleDebug,
+                      const SizedBox(width: 12),
+                      _InfoTile(
+                        label: 'Last packet',
+                        value: _controller.lastReadingReceived == null
+                            ? '—'
+                            : _timeAgo(_controller.lastReadingReceived!),
+                        icon: Icons.schedule,
+                      ),
+                      const SizedBox(width: 12),
+                      _InfoTile(
+                        label: 'Battery',
+                        value: '${battery ?? 0}%',
+                        icon: Icons.bolt,
                       ),
                     ],
                   ),
-                ),
-              ),
-            ),
-
-            // =======================
-            // Bottom Navigation
-            // =======================
-            Positioned(
-              bottom: 24,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _navButton(
-                    icon: Icons.info_outline,
-                    label: 'Device',
-                    onTap: _openDeviceInfo,
+                  const SizedBox(height: 24),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _chipAction(
+                        icon: Icons.refresh,
+                        label: 'Rescan',
+                        onTap: _controller.startBle,
+                      ),
+                      _chipAction(
+                        icon: Icons.timeline,
+                        label: 'History',
+                        onTap: _openHistory,
+                      ),
+                      _chipAction(
+                        icon: Icons.tune,
+                        label: 'Calibrate',
+                        onTap: _openCalibration,
+                      ),
+                      _chipAction(
+                        icon: Icons.settings,
+                        label: 'Settings',
+                        onTap: _openSettings,
+                      ),
+                      _chipAction(
+                        icon: Icons.info_outline,
+                        label: 'Device info',
+                        onTap: _openDeviceInfo,
+                      ),
+                      if (_controller.devMode)
+                        _chipAction(
+                          icon: Icons.bug_report,
+                          label: 'Debug overlay',
+                          onTap: _toggleDebug,
+                        ),
+                    ],
                   ),
-                  _navButton(
-                    icon: Icons.timeline,
-                    label: 'History',
-                    onTap: _openHistory,
-                  ),
-                  _navButton(
-                    icon: Icons.tune,
-                    label: 'Calibrate',
-                    onTap: _openCalibration,
-                  ),
-                  _navButton(
-                    icon: Icons.settings,
-                    label: 'Settings',
-                    onTap: _openSettings,
-                  ),
-                  if (_devMode)
-                    _navButton(
-                      icon: Icons.bug_report,
-                      label: 'Debug',
-                      onTap: () {
-                        setState(() => _showDebugOverlay = true);
-                      },
+                  const Spacer(),
+                  Align(
+                    alignment: Alignment.bottomRight,
+                    child: Text(
+                      status.message,
+                      style: const TextStyle(color: Colors.white60),
                     ),
+                  ),
                 ],
               ),
             ),
-
-            // =======================
-            // Debug Overlay
-            // =======================
-            if (_devMode && _showDebugOverlay)
+            if (_controller.devMode && _showDebugOverlay)
               Positioned.fill(
                 child: GestureDetector(
                   onTap: () {
                     setState(() => _showDebugOverlay = false);
                   },
                   child: DebugOverlay(
-                    deviceName: _ble.device?.name ?? 'Unknown',
-                    deviceId: _ble.device?.id ?? '-',
-                    velocity: _velocity,
-                    battery: _battery,
-                    lastStatus: _status.toString(),
-                    error: _lastError,
+                    deviceName: _controller.ble.device?.name ?? 'Unknown',
+                    deviceId: _controller.ble.device?.id ?? '-',
+                    velocity: velocity,
+                    battery: battery,
+                    rssi: _controller.ble.lastRssi,
+                    lastStatus: status.toString(),
+                    error: status.isError ? status.message : '',
                   ),
                 ),
               ),
@@ -312,40 +360,78 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _navButton({
+  Widget _chipAction({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.black54,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.5),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
+    return ActionChip(
+      labelPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      avatar: Icon(icon, size: 18, color: Colors.white),
+      label: Text(label),
+      onPressed: onTap,
+      backgroundColor: Colors.white.withOpacity(0.06),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: Colors.white.withOpacity(0.08)),
+      ),
+    );
+  }
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 10) return 'just now';
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    return '${diff.inHours}h ago';
+  }
+}
+
+class _InfoTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+
+  const _InfoTile({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.08)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 18, color: Colors.white70),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
               ),
-            ],
-          ),
-          child: IconButton(
-            icon: Icon(icon, color: Colors.white),
-            onPressed: onTap,
-          ),
+            ),
+          ],
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: Colors.white70,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
