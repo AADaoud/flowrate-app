@@ -59,19 +59,19 @@ It is engineered for robustness, smooth UX, and compatibility with modern Androi
 
 # Screenshots
 ## Attempting to connect to ESP32 over BLE
-<img width="576" height="1280" alt="image" src="https://github.com/user-attachments/assets/afcf0782-97b1-4ecd-83c5-ca43b28c241c" />
+<img height="640" alt="image" src="https://github.com/user-attachments/assets/afcf0782-97b1-4ecd-83c5-ca43b28c241c" />
 
 ## Succcesfully connected and displaying received data
-<img width="576" height="1280" alt="image" src="https://github.com/user-attachments/assets/55945227-374d-4aaa-9165-203df5aba4eb" />
+<img height="640" alt="image" src="https://github.com/user-attachments/assets/55945227-374d-4aaa-9165-203df5aba4eb" />
 
 ## History with interactive charts and info
-<img width="576" height="1280" alt="image" src="https://github.com/user-attachments/assets/f64d705a-b8ab-4be7-9292-262726657b58" />
+<img height="640" alt="image" src="https://github.com/user-attachments/assets/f64d705a-b8ab-4be7-9292-262726657b58" />
 
 ## Connected device information
-<img width="576" height="1280" alt="image" src="https://github.com/user-attachments/assets/ec6f8420-7baa-4017-92d4-973210bdde47" />
+<img height="640" alt="image" src="https://github.com/user-attachments/assets/ec6f8420-7baa-4017-92d4-973210bdde47" />
 
 ## Settings page with Dev options for debugging purposes
-<img width="576" height="1280" alt="image" src="https://github.com/user-attachments/assets/063eadcd-d031-4b09-a347-994394bbfd7b" />
+<img height="640" alt="image" src="https://github.com/user-attachments/assets/063eadcd-d031-4b09-a347-994394bbfd7b" />
 
 
 ---
