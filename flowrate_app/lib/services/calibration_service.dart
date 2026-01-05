@@ -57,10 +57,10 @@ class CalibrationService {
   final Map<String, _CalibrationState> _states = {};
 
   // Tunable heuristics
-  final int minSamples = 25;
-  final double targetNoise = 0.002; // 2 mV
-  final double targetDrift = 0.0015; // 1.5 mV over the window
-  final Duration window = const Duration(seconds: 35);
+  final int minSamples = 15;
+  final double targetNoise = 0.005; // 5 mV
+  final double targetDrift = 0.0045; // 4.5 mV over the window
+  final Duration window = const Duration(seconds: 28);
 
   CalibrationStatus statusForProfile(String? profileId) {
     if (profileId == null) {
@@ -225,7 +225,8 @@ class _CalibrationState {
 
     final stableNoise = _noise <= targetNoise;
     final stableDrift = _drift <= targetDrift;
-    if (stableNoise && stableDrift) {
+    if (stableNoise && stableDrift ||
+        _stabilityScore > 0.82) {
       _baseline = _mean;
       _phase = CalibrationPhase.waitingForReference;
       _message =

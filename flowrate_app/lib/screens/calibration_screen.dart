@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/setup_profile.dart';
 import '../services/calibration_service.dart';
@@ -18,6 +19,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   double _referenceVelocity = 20;
   bool _electricalReference = false;
   late final TextEditingController _refController;
+  CalibrationPhase? _lastPhase;
 
   @override
   void initState() {
@@ -34,6 +36,13 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   }
 
   void _handleUpdate() {
+    final currentPhase = widget.controller.calibrationStatus.phase;
+    if (_lastPhase != CalibrationPhase.calibrated &&
+        currentPhase == CalibrationPhase.calibrated &&
+        widget.controller.hapticsEnabled) {
+      HapticFeedback.mediumImpact();
+    }
+    _lastPhase = currentPhase;
     if (mounted) setState(() {});
   }
 
@@ -73,27 +82,28 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
                       ),
                     ),
                     const SizedBox(width: 16),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Calibration',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Calibration',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Baseline first, then reference',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.white60,
+                          Text(
+                            'Baseline first, then reference',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.white60,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                    const Spacer(),
                     _StatusPill(calibration: calibration),
                   ],
                 ),
@@ -188,18 +198,21 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
             style: const TextStyle(color: Colors.white70, height: 1.4),
           ),
           const SizedBox(height: 8),
-          TextButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      SetupProfileScreen(controller: widget.controller),
-                ),
-              );
-            },
-            icon: const Icon(Icons.edit),
-            label: const Text('Switch profile'),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        SetupProfileScreen(controller: widget.controller),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.edit),
+              label: const Text('Switch profile'),
+            ),
           ),
         ],
       ),
@@ -486,23 +499,32 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            runAlignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
             children: [
-              Icon(
-                Icons.shield,
-                color:
-                    isOperational ? Colors.tealAccent : Colors.orangeAccent,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.shield,
+                    color:
+                        isOperational ? Colors.tealAccent : Colors.orangeAccent,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Confidence ${((calibration.stabilityScore) * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                'Confidence ${((calibration.stabilityScore) * 100).clamp(0, 100).toStringAsFixed(0)}%',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
               if (!isOperational)
                 const Text(
                   'Velocity locked for this profile',

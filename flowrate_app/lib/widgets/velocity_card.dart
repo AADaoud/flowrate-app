@@ -259,29 +259,38 @@ class VelocityCard extends StatelessWidget {
   Widget _diagnosticsRow() {
     return Row(
       children: [
-        Text(
-          isCalibrated ? 'Recent trend' : 'Profiling baseline',
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.7),
-            fontWeight: FontWeight.w600,
+        Flexible(
+          child: Text(
+            isCalibrated ? 'Recent trend' : 'Profiling baseline',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.7),
+              fontWeight: FontWeight.w600,
+            ),
+            overflow: TextOverflow.ellipsis,
           ),
         ),
-        const Spacer(),
+        const SizedBox(width: 8),
         if (noise != null)
-          Text(
-            'Noise ${noise!.toStringAsFixed(4)} V',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
-              fontSize: 12,
+          Flexible(
+            child: Text(
+              'Noise ${noise!.toStringAsFixed(4)} V',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         if (drift != null) ...[
           const SizedBox(width: 8),
-          Text(
-            'Drift ${drift!.toStringAsFixed(4)} V',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
-              fontSize: 12,
+          Flexible(
+            child: Text(
+              'Drift ${drift!.toStringAsFixed(4)} V',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

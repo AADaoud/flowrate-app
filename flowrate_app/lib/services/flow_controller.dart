@@ -36,6 +36,7 @@ class FlowController extends ChangeNotifier {
   FlowReading? latest;
   double? _calibratedVelocity;
   SetupProfile? activeProfile;
+  int? lastBattery;
   final List<SetupProfile> profiles = [];
 
   bool loggingEnabled = true;
@@ -68,6 +69,7 @@ class FlowController extends ChangeNotifier {
 
     final velocity = _calibration.apply(activeProfile?.id, sample.rawVoltage);
     _calibratedVelocity = velocity;
+    lastBattery = sample.battery;
 
     if (loggingEnabled) {
       final filtered = _filter.addSample(

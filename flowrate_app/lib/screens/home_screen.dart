@@ -105,10 +105,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (status.stage != _lastStage) {
-      if (_controller.hapticsEnabled && status.stage == AppBleStage.connected) {
-        HapticFeedback.mediumImpact();
-      } else if (_controller.hapticsEnabled && status.stage == AppBleStage.error) {
-        HapticFeedback.vibrate();
+      if (_controller.hapticsEnabled) {
+        if (status.stage == AppBleStage.connected) {
+          HapticFeedback.mediumImpact();
+        } else if (status.stage == AppBleStage.disconnected) {
+          HapticFeedback.selectionClick();
+        } else if (status.stage == AppBleStage.error) {
+          HapticFeedback.vibrate();
+        }
       }
       if (_controller.soundEnabled && status.stage == AppBleStage.connected) {
         SystemSound.play(SystemSoundType.alert);
@@ -217,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final velocity = _controller.calibratedVelocity;
     final isCalibrated = _controller.calibrationMatchesProfile;
     final rawVoltage = reading?.rawVoltage ?? 0;
-    final battery = reading?.battery;
+    final battery = reading?.battery ?? _controller.lastBattery;
     final status = _controller.status;
     final profileLabel = _controller.activeProfile?.label ?? 'None';
     final statusText = !_controller.hasProfile
@@ -282,7 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         rawVoltage: rawVoltage,
                         velocity: velocity,
                         samples: _sparkline(),
-                        isCalibrated: calibration.isOperational,
+                        isCalibrated: _controller.calibrationMatchesProfile,
                         statusText: statusText,
                         baseline: calibration.baseline,
                         noise: calibration.noise,
