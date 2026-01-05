@@ -75,13 +75,14 @@ class CalibrationService {
         message: "Select setup profile first",
       );
     }
-    return _states[profileId]?.status ?? _CalibrationState(
-      profileId: profileId,
-      targetDrift: targetDrift,
-      targetNoise: targetNoise,
-      window: window,
-      minSamples: minSamples,
-    ).status;
+    return _states[profileId]?.status ??
+        _CalibrationState(
+          profileId: profileId,
+          targetDrift: targetDrift,
+          targetNoise: targetNoise,
+          window: window,
+          minSamples: minSamples,
+        ).status;
   }
 
   void addSample(String? profileId, double rawVoltage,

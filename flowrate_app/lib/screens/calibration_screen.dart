@@ -26,6 +26,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   void initState() {
     super.initState();
     _refController = TextEditingController(text: '20');
+    _requireReference = widget.controller.requireReference;
     widget.controller.addListener(_handleUpdate);
   }
 

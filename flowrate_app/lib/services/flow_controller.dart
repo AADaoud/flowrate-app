@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import '../models/app_ble_status.dart';
 import '../models/flow_reading.dart';
@@ -19,6 +20,10 @@ class FlowController extends ChangeNotifier {
     _readingSub = ble.readingStream.listen((reading) {
       latest = reading;
       _lastReadingReceived = DateTime.now();
+      if (kDebugMode) {
+        debugPrint(
+            '[FlowController] reading v=${reading.rawVoltage}V b=${reading.battery}% profile=${activeProfile?.id ?? "none"}');
+      }
 
       _calibration.addSample(
         activeProfile?.id,

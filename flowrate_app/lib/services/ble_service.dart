@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
 import '../models/app_ble_status.dart';
@@ -227,6 +228,10 @@ class BleVelocityService {
 
         try {
           final reading = FlowReading.fromPayload(jsonStr, rssi: lastRssi);
+          if (kDebugMode) {
+            debugPrint(
+                '[BLE] payload parsed v=${reading.rawVoltage}V b=${reading.battery}% rssi=$lastRssi');
+          }
           _readingController.add(reading);
           _batteryController.add(reading.battery);
         } catch (e) {
