@@ -8,6 +8,7 @@ import '../models/app_ble_status.dart';
 import '../models/flow_reading.dart';
 import '../models/velocity_sample.dart';
 import '../services/ble_service.dart';
+import '../services/calibration_service.dart';
 import '../services/flow_controller.dart';
 import '../widgets/battery_chip.dart';
 import '../widgets/ble_status_bar.dart';
@@ -90,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final reading = _controller.latest;
 
     if (reading != null) {
-      _updateFlowState(reading.velocity);
+      _updateFlowState(_controller.calibratedVelocity ?? 0);
       if (_controller.hapticsEnabled &&
           (_lastReadingFeedback?.timestamp != reading.timestamp)) {
         HapticFeedback.selectionClick();
@@ -144,7 +145,9 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => const CalibrationScreen(),
+        builder: (_) => CalibrationScreen(
+          controller: _controller,
+        ),
       ),
     );
   }
@@ -200,9 +203,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final artboard = _artboard;
     final reading = _controller.latest;
-    final velocity = reading?.velocity ?? 0;
+    final calibration = _controller.calibrationStatus;
+    final velocity = _controller.calibratedVelocity;
+    final isCalibrated = calibration.isOperational;
+    final rawVoltage = reading?.rawVoltage ?? 0;
     final battery = reading?.battery;
     final status = _controller.status;
+    final statusText = calibration.message ??
+        (calibration.phase == CalibrationPhase.calibrated
+            ? 'Calibrated profile active'
+            : 'Waiting for stable baseline…');
 
     return Scaffold(
       body: SafeArea(
@@ -256,8 +266,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       
                       // Velocity Card
                       VelocityCard(
+                        rawVoltage: rawVoltage,
                         velocity: velocity,
                         samples: _sparkline(),
+                        isCalibrated: calibration.isOperational,
+                        statusText: statusText,
+                        baseline: calibration.baseline,
+                        noise: calibration.noise,
+                        drift: calibration.drift,
                       ),
                       const SizedBox(height: 16),
                       
@@ -357,6 +373,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       deviceName: _controller.ble.device?.name ?? 'Unknown',
                       deviceId: _controller.ble.device?.id ?? '-',
                       velocity: velocity,
+                      rawVoltage: rawVoltage,
+                      calibrated: isCalibrated,
                       battery: battery,
                       rssi: _controller.ble.lastRssi,
                       lastStatus: status.toString(),
