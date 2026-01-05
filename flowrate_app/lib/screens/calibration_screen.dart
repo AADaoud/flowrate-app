@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../models/setup_profile.dart';
 import '../services/calibration_service.dart';
 import '../services/flow_controller.dart';
+import 'setup_profile_screen.dart';
 
 class CalibrationScreen extends StatefulWidget {
   const CalibrationScreen({super.key, required this.controller});
@@ -40,6 +42,8 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
     final calibration = widget.controller.calibrationStatus;
     final latest = widget.controller.latest;
     final rawVoltage = latest?.rawVoltage ?? 0;
+    final hasProfile = widget.controller.activeProfile != null;
+    final profile = widget.controller.activeProfile;
 
     return Scaffold(
       body: Container(
@@ -101,11 +105,13 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _liveCard(calibration, rawVoltage),
+                        _profileBanner(profile),
+                        const SizedBox(height: 12),
+                        _liveCard(calibration, rawVoltage, hasProfile),
                         const SizedBox(height: 16),
-                        _baselineCard(calibration),
+                        _baselineCard(calibration, hasProfile),
                         const SizedBox(height: 16),
-                        _referenceCard(calibration),
+                        _referenceCard(calibration, hasProfile),
                         const SizedBox(height: 16),
                         _confidenceCard(calibration),
                         const SizedBox(height: 16),
@@ -122,7 +128,86 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
     );
   }
 
-  Widget _liveCard(CalibrationStatus calibration, double rawVoltage) {
+  Widget _profileBanner(SetupProfile? profile) {
+    if (profile == null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: _cardDecoration(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Profile required',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Select or create a setup profile (magnets, pipe, electrodes, coupling) before calibration.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        SetupProfileScreen(controller: widget.controller),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.settings_input_component),
+              label: const Text('Manage setup profiles'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Active setup profile',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${profile.magnetSizeMm.toStringAsFixed(0)} mm magnets × ${profile.magnetCount}\nPipe: ${profile.pipeDiameterMm.toStringAsFixed(0)} mm · Electrodes: ${profile.electrodeType.name}\nCoupling: ${profile.couplingMode.name}${profile.notes.isNotEmpty ? "\nNotes: ${profile.notes}" : ""}',
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      SetupProfileScreen(controller: widget.controller),
+                ),
+              );
+            },
+            icon: const Icon(Icons.edit),
+            label: const Text('Switch profile'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveCard(
+      CalibrationStatus calibration, double rawVoltage, bool hasProfile) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: _cardDecoration(),
@@ -154,23 +239,29 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            calibration.message ??
-                'Waiting for baseline stability before enabling velocity.',
+            hasProfile
+                ? (calibration.message ??
+                    'Waiting for baseline stability before enabling velocity.')
+                : 'Select a setup profile before profiling baseline.',
             style: TextStyle(
               color: Colors.white.withOpacity(0.72),
             ),
           ),
           const SizedBox(height: 12),
           LinearProgressIndicator(
-            value: calibration.phase == CalibrationPhase.calibrated
-                ? 1
-                : calibration.stabilityScore.clamp(0, 1),
+            value: !hasProfile
+                ? 0
+                : calibration.phase == CalibrationPhase.calibrated
+                    ? 1
+                    : calibration.stabilityScore.clamp(0, 1),
             minHeight: 8,
             backgroundColor: Colors.white12,
             valueColor: AlwaysStoppedAnimation(
-              calibration.phase == CalibrationPhase.calibrated
-                  ? Colors.tealAccent
-                  : Colors.orangeAccent,
+              !hasProfile
+                  ? Colors.orangeAccent
+                  : calibration.phase == CalibrationPhase.calibrated
+                      ? Colors.tealAccent
+                      : Colors.orangeAccent,
             ),
           ),
           const SizedBox(height: 8),
@@ -186,7 +277,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
     );
   }
 
-  Widget _baselineCard(CalibrationStatus calibration) {
+  Widget _baselineCard(CalibrationStatus calibration, bool hasProfile) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: _cardDecoration(),
@@ -236,9 +327,11 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: () {
-              widget.controller.resetCalibration();
-            },
+            onPressed: hasProfile
+                ? () {
+                    widget.controller.resetCalibration();
+                  }
+                : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white.withOpacity(0.08),
               foregroundColor: Colors.white,
@@ -251,7 +344,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
     );
   }
 
-  Widget _referenceCard(CalibrationStatus calibration) {
+  Widget _referenceCard(CalibrationStatus calibration, bool hasProfile) {
     final waiting = calibration.phase == CalibrationPhase.waitingForReference ||
         calibration.phase == CalibrationPhase.unstable;
 
@@ -338,7 +431,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: waiting
+            onPressed: hasProfile && waiting
                 ? () {
                     final ok = widget.controller.captureReference(
                       _referenceVelocity,
@@ -374,7 +467,9 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
             )
           else
             Text(
-              'Tip: toggle the switch if you are injecting a known electrical bias instead of fluid flow.',
+              hasProfile
+                  ? 'Tip: toggle the switch if you are injecting a known electrical bias instead of fluid flow.'
+                  : 'Select a setup profile before capturing a reference.',
               style: TextStyle(color: Colors.white.withOpacity(0.65)),
             ),
         ],
@@ -383,7 +478,8 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   }
 
   Widget _confidenceCard(CalibrationStatus calibration) {
-    final isStable = calibration.phase == CalibrationPhase.calibrated;
+    final isOperational = calibration.isOperational;
+    final reduced = calibration.phase == CalibrationPhase.unstable;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: _cardDecoration(),
@@ -394,7 +490,8 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
             children: [
               Icon(
                 Icons.shield,
-                color: isStable ? Colors.tealAccent : Colors.orangeAccent,
+                color:
+                    isOperational ? Colors.tealAccent : Colors.orangeAccent,
               ),
               const SizedBox(width: 8),
               Text(
@@ -406,10 +503,15 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
                 ),
               ),
               const Spacer(),
-              if (!isStable)
+              if (!isOperational)
                 const Text(
-                  'Velocity hidden',
+                  'Velocity locked for this profile',
                   style: TextStyle(color: Colors.orangeAccent),
+                )
+              else if (reduced)
+                const Text(
+                  'Reduced confidence for current setup',
+                  style: TextStyle(color: Colors.amberAccent),
                 )
               else
                 const Text(
@@ -420,7 +522,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Velocity output appears only after baseline stabilizes and a reference is captured. If drift or noise spike, the app will lock velocity until you recalibrate.',
+            'Velocity output appears only after a profile-specific baseline stabilizes and a reference is captured. If drift or noise spikes, confidence drops and you may choose to recalibrate.',
             style: TextStyle(
               color: Colors.white.withOpacity(0.7),
               height: 1.4,
@@ -521,24 +623,29 @@ class _StatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     Color color;
     String text;
-    switch (calibration.phase) {
-      case CalibrationPhase.uncalibrated:
-      case CalibrationPhase.profiling:
-        color = Colors.orangeAccent;
-        text = 'Profiling';
-        break;
-      case CalibrationPhase.waitingForReference:
-        color = Colors.amberAccent;
-        text = 'Attach reference';
-        break;
-      case CalibrationPhase.calibrated:
-        color = Colors.tealAccent;
-        text = 'Operational';
-        break;
-      case CalibrationPhase.unstable:
-        color = Colors.redAccent;
-        text = 'Unstable';
-        break;
+    if (calibration.profileId.isEmpty) {
+      color = Colors.orangeAccent;
+      text = 'Select profile';
+    } else {
+      switch (calibration.phase) {
+        case CalibrationPhase.uncalibrated:
+        case CalibrationPhase.profiling:
+          color = Colors.orangeAccent;
+          text = 'Profiling';
+          break;
+        case CalibrationPhase.waitingForReference:
+          color = Colors.amberAccent;
+          text = 'Attach reference';
+          break;
+        case CalibrationPhase.calibrated:
+          color = Colors.tealAccent;
+          text = 'Operational';
+          break;
+        case CalibrationPhase.unstable:
+          color = Colors.redAccent;
+          text = 'Unstable';
+          break;
+      }
     }
 
     return Container(

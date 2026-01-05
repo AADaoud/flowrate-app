@@ -10,6 +10,7 @@ enum CalibrationPhase {
 
 class CalibrationStatus {
   CalibrationStatus({
+    required this.profileId,
     required this.phase,
     required this.sampleCount,
     required this.noise,
@@ -24,6 +25,7 @@ class CalibrationStatus {
     this.message,
   });
 
+  final String profileId;
   final CalibrationPhase phase;
   final int sampleCount;
   final double? baseline;
@@ -40,7 +42,10 @@ class CalibrationStatus {
   bool get hasBaseline => baseline != null;
   bool get hasReference =>
       referenceVelocity != null && referenceVoltage != null && slope != null;
-  bool get isOperational => phase == CalibrationPhase.calibrated && hasReference;
+  bool get isOperational =>
+      (phase == CalibrationPhase.calibrated ||
+          phase == CalibrationPhase.unstable) &&
+      hasReference;
 
   double? apply(double rawVoltage) {
     if (!isOperational || baseline == null || slope == null) return null;
@@ -49,6 +54,101 @@ class CalibrationStatus {
 }
 
 class CalibrationService {
+  final Map<String, _CalibrationState> _states = {};
+
+  // Tunable heuristics
+  final int minSamples = 25;
+  final double targetNoise = 0.002; // 2 mV
+  final double targetDrift = 0.0015; // 1.5 mV over the window
+  final Duration window = const Duration(seconds: 35);
+
+  CalibrationStatus statusForProfile(String? profileId) {
+    if (profileId == null) {
+      return CalibrationStatus(
+        profileId: '',
+        phase: CalibrationPhase.uncalibrated,
+        sampleCount: 0,
+        noise: 0,
+        drift: 0,
+        stabilityScore: 0,
+        referenceIsElectrical: false,
+        message: "Select setup profile first",
+      );
+    }
+    return _states[profileId]?.status ?? _CalibrationState(
+      profileId: profileId,
+      targetDrift: targetDrift,
+      targetNoise: targetNoise,
+      window: window,
+      minSamples: minSamples,
+    ).status;
+  }
+
+  void addSample(String? profileId, double rawVoltage) {
+    if (profileId == null) return;
+    final state = _states.putIfAbsent(
+      profileId,
+      () => _CalibrationState(
+        profileId: profileId,
+        targetNoise: targetNoise,
+        targetDrift: targetDrift,
+        window: window,
+        minSamples: minSamples,
+      ),
+    );
+    state.addSample(rawVoltage);
+  }
+
+  bool captureReference(String? profileId, double knownVelocity,
+      {bool electricalReference = false}) {
+    if (profileId == null) return false;
+    final state = _states.putIfAbsent(
+      profileId,
+      () => _CalibrationState(
+        profileId: profileId,
+        targetNoise: targetNoise,
+        targetDrift: targetDrift,
+        window: window,
+        minSamples: minSamples,
+      ),
+    );
+    return state.captureReference(knownVelocity,
+        electricalReference: electricalReference);
+  }
+
+  double? apply(String? profileId, double rawVoltage) {
+    if (profileId == null) return null;
+    final state = _states[profileId];
+    return state?.apply(rawVoltage);
+  }
+
+  void resetProfile(String? profileId) {
+    if (profileId == null) return;
+    _states[profileId] = _CalibrationState(
+      profileId: profileId,
+      targetNoise: targetNoise,
+      targetDrift: targetDrift,
+      window: window,
+      minSamples: minSamples,
+    );
+  }
+}
+
+class _CalibrationState {
+  _CalibrationState({
+    required this.profileId,
+    required this.targetNoise,
+    required this.targetDrift,
+    required this.window,
+    required this.minSamples,
+  });
+
+  final String profileId;
+  final double targetNoise;
+  final double targetDrift;
+  final Duration window;
+  final int minSamples;
+
   final List<_Sample> _samples = [];
 
   CalibrationPhase _phase = CalibrationPhase.uncalibrated;
@@ -57,16 +157,11 @@ class CalibrationService {
   double? _intercept = 0;
   double? _referenceVelocity;
   double? _referenceVoltage;
-  String? _message;
+  String? _message = "Calibration required for current setup profile.";
   bool _referenceIsElectrical = false;
 
-  // Tunable heuristics
-  final int minSamples = 25;
-  final double targetNoise = 0.002; // 2 mV
-  final double targetDrift = 0.0015; // 1.5 mV over the window
-  final Duration window = const Duration(seconds: 35);
-
   CalibrationStatus get status => CalibrationStatus(
+        profileId: profileId,
         phase: _phase,
         sampleCount: _samples.length,
         baseline: _baseline,
@@ -96,8 +191,7 @@ class CalibrationService {
 
   double get _mean {
     if (_samples.isEmpty) return 0;
-    final total =
-        _samples.fold<double>(0, (sum, s) => sum + s.value);
+    final total = _samples.fold<double>(0, (sum, s) => sum + s.value);
     return total / _samples.length;
   }
 
@@ -112,27 +206,20 @@ class CalibrationService {
     final now = DateTime.now();
     _samples.add(_Sample(rawVoltage, now));
 
-    // trim window
     while (_samples.isNotEmpty &&
         now.difference(_samples.first.time) > window) {
       _samples.removeAt(0);
     }
 
-    if (_phase == CalibrationPhase.calibrated) {
+    if (_phase == CalibrationPhase.calibrated ||
+        _phase == CalibrationPhase.unstable) {
       _monitorPostCalibration();
-      return;
-    }
-
-    if (_phase == CalibrationPhase.waitingForReference &&
-        _samples.length >= minSamples * 2) {
-      // Refresh baseline gently if drifted but keep phase.
-      _baseline = _mean;
       return;
     }
 
     _phase = CalibrationPhase.profiling;
     if (_samples.length < minSamples) {
-      _message = "Collecting baseline samples…";
+      _message = "Collecting baseline samples for this setup profile…";
       return;
     }
 
@@ -144,14 +231,15 @@ class CalibrationService {
       _message =
           "Baseline locked at ${_baseline!.toStringAsFixed(4)} V. Attach reference or hold known flow.";
     } else {
-      _message = "Waiting for stability (noise ${_noise.toStringAsFixed(4)} V, drift ${_drift.toStringAsFixed(4)} V)";
+      _message =
+          "Waiting for stability (noise ${_noise.toStringAsFixed(4)} V, drift ${_drift.toStringAsFixed(4)} V)";
     }
   }
 
   bool captureReference(double knownVelocity,
       {bool electricalReference = false}) {
     if (_baseline == null) {
-      _message = "Baseline not locked yet.";
+      _message = "Baseline not locked yet for this setup profile.";
       return false;
     }
     final referenceVoltage = _recentMean();
@@ -172,18 +260,6 @@ class CalibrationService {
     return true;
   }
 
-  void reset() {
-    _samples.clear();
-    _baseline = null;
-    _slope = null;
-    _intercept = 0;
-    _referenceVelocity = null;
-    _referenceVoltage = null;
-    _referenceIsElectrical = false;
-    _phase = CalibrationPhase.uncalibrated;
-    _message = "Calibration reset. Waiting for baseline.";
-  }
-
   void _monitorPostCalibration() {
     if (_baseline == null) return;
     final current = _recentMean();
@@ -191,7 +267,7 @@ class CalibrationService {
     if (driftFromBaseline > targetDrift * 4 || _noise > targetNoise * 4) {
       _phase = CalibrationPhase.unstable;
       _message =
-          "Baseline drifted (${driftFromBaseline.toStringAsFixed(4)} V). Recalibration required.";
+          "Reduced confidence for current setup (drift ${driftFromBaseline.toStringAsFixed(4)} V).";
     }
   }
 
@@ -202,6 +278,8 @@ class CalibrationService {
     final sum = slice.fold<double>(0, (s, v) => s + v.value);
     return sum / slice.length;
   }
+
+  double? apply(double rawVoltage) => status.apply(rawVoltage);
 }
 
 class _Sample {

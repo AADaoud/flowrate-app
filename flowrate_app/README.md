@@ -37,6 +37,7 @@ Battery percent is low-pass filtered to avoid jitter. If using ADC, set the divi
 ### Calibration-first app behavior
 - The app now treats `v` as the raw ADS1115 A0-to-GND voltage. With nothing connected, expect ~0.0359 V due to floating bias and coupling.
 - Velocity is hidden until the app observes a stable baseline and you capture a known reference (electrical or flow).
+- Calibration is scoped to a **Setup Profile** (magnets, pipe diameter, electrode type, coupling mode, notes). Changing the profile immediately locks velocity until that profile is calibrated.
 - A calibration screen guides the wait-for-stability ➜ capture-reference ➜ operational flow and will re-lock velocity if noise or drift rises.
 
 ## Migration notes

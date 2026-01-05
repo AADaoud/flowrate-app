@@ -6,6 +6,7 @@ class DebugOverlay extends StatelessWidget {
   final double rawVoltage;
   final double? velocity;
   final bool calibrated;
+  final String profileLabel;
   final int? battery;
   final int? rssi;
   final String lastStatus;
@@ -18,6 +19,7 @@ class DebugOverlay extends StatelessWidget {
     required this.rawVoltage,
     required this.velocity,
     required this.calibrated,
+    required this.profileLabel,
     required this.battery,
     required this.rssi,
     required this.lastStatus,
@@ -56,6 +58,7 @@ class DebugOverlay extends StatelessWidget {
                 Text(
                     'Velocity: ${calibrated && velocity != null ? velocity!.toStringAsFixed(2) : "LOCKED"}'),
                 Text('Raw: ${rawVoltage.toStringAsFixed(4)} V'),
+                Text('Profile: $profileLabel'),
                 Text('Battery: ${battery ?? 0}%'),
                 Text('RSSI: ${rssi ?? 0} dBm'),
                 Text('Status: $lastStatus'),

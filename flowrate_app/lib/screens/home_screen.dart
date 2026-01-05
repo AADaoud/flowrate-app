@@ -17,6 +17,7 @@ import '../widgets/velocity_card.dart';
 import 'calibration_screen.dart';
 import 'device_info_screen.dart';
 import 'history_screen.dart';
+import 'setup_profile_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -189,6 +190,15 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _openSetupProfiles() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SetupProfileScreen(controller: _controller),
+      ),
+    );
+  }
+
   List<double> _sparkline() {
     if (_controller.history.isEmpty) return [];
     final history = _controller.history;
@@ -205,14 +215,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final reading = _controller.latest;
     final calibration = _controller.calibrationStatus;
     final velocity = _controller.calibratedVelocity;
-    final isCalibrated = calibration.isOperational;
+    final isCalibrated = _controller.calibrationMatchesProfile;
     final rawVoltage = reading?.rawVoltage ?? 0;
     final battery = reading?.battery;
     final status = _controller.status;
-    final statusText = calibration.message ??
-        (calibration.phase == CalibrationPhase.calibrated
-            ? 'Calibrated profile active'
-            : 'Waiting for stable baseline…');
+    final profileLabel = _controller.activeProfile?.label ?? 'None';
+    final statusText = !_controller.hasProfile
+        ? 'Select setup profile first'
+        : (!isCalibrated
+            ? 'Calibration required for current setup profile'
+            : (calibration.message ??
+                'Calibrated profile active for this setup'));
 
     return Scaffold(
       body: SafeArea(
@@ -309,6 +322,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         runSpacing: 12,
                         children: [
                           _chipAction(
+                            icon: Icons.settings_input_component,
+                            label: 'Setup profile',
+                            onTap: _openSetupProfiles,
+                          ),
+                          _chipAction(
                             icon: Icons.refresh,
                             label: 'Rescan',
                             onTap: () => _controller.ble.reset(),
@@ -375,6 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       velocity: velocity,
                       rawVoltage: rawVoltage,
                       calibrated: isCalibrated,
+                      profileLabel: profileLabel,
                       battery: battery,
                       rssi: _controller.ble.lastRssi,
                       lastStatus: status.toString(),

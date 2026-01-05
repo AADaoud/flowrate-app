@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/app_ble_status.dart';
 import '../models/flow_reading.dart';
+import '../models/setup_profile.dart';
 import '../models/velocity_sample.dart';
 import 'ble_service.dart';
 import 'calibration_service.dart';
@@ -19,7 +20,7 @@ class FlowController extends ChangeNotifier {
       latest = reading;
       _lastReadingReceived = DateTime.now();
 
-      _calibration.addSample(reading.rawVoltage);
+      _calibration.addSample(activeProfile?.id, reading.rawVoltage);
       _updateVelocityHistory();
 
       notifyListeners();
@@ -34,6 +35,8 @@ class FlowController extends ChangeNotifier {
       AppBleStatus(AppBleStage.idle, 'Waiting to start BLE');
   FlowReading? latest;
   double? _calibratedVelocity;
+  SetupProfile? activeProfile;
+  final List<SetupProfile> profiles = [];
 
   bool loggingEnabled = true;
   bool devMode = false;
@@ -50,14 +53,20 @@ class FlowController extends ChangeNotifier {
   StreamSubscription<AppBleStatus>? _statusSub;
   StreamSubscription<FlowReading>? _readingSub;
 
-  CalibrationStatus get calibrationStatus => _calibration.status;
+  CalibrationStatus get calibrationStatus =>
+      _calibration.statusForProfile(activeProfile?.id);
   double? get calibratedVelocity => _calibratedVelocity;
+  bool get hasProfile => activeProfile != null;
+  bool get calibrationMatchesProfile =>
+      hasProfile &&
+      calibrationStatus.profileId == activeProfile!.id &&
+      calibrationStatus.isOperational;
 
   void _updateVelocityHistory() {
     final sample = latest;
     if (sample == null) return;
 
-    final velocity = _calibration.status.apply(sample.rawVoltage);
+    final velocity = _calibration.apply(activeProfile?.id, sample.rawVoltage);
     _calibratedVelocity = velocity;
 
     if (loggingEnabled) {
@@ -95,21 +104,40 @@ class FlowController extends ChangeNotifier {
   }
 
   void resetCalibration() {
-    _calibration.reset();
+    _calibration.resetProfile(activeProfile?.id);
     _calibratedVelocity = null;
     notifyListeners();
   }
 
   bool captureReference(double knownVelocity,
       {bool electricalReference = false}) {
-    final success = _calibration.captureReference(knownVelocity,
-        electricalReference: electricalReference);
+    final success = _calibration.captureReference(
+      activeProfile?.id,
+      knownVelocity,
+      electricalReference: electricalReference,
+    );
     if (success && latest != null) {
       _calibratedVelocity =
-          _calibration.status.apply(latest!.rawVoltage);
+          _calibration.apply(activeProfile?.id, latest!.rawVoltage);
     }
     notifyListeners();
     return success;
+  }
+
+  void addProfile(SetupProfile profile) {
+    profiles.add(profile);
+    activeProfile = profile;
+    _calibratedVelocity = null;
+    _calibration.resetProfile(profile.id);
+    notifyListeners();
+  }
+
+  void selectProfile(String profileId) {
+    final found = profiles.where((p) => p.id == profileId);
+    if (found.isEmpty) return;
+    activeProfile = found.first;
+    _calibratedVelocity = null;
+    notifyListeners();
   }
 
   @override
