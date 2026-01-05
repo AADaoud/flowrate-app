@@ -20,9 +20,18 @@ class FlowController extends ChangeNotifier {
       latest = reading;
       _lastReadingReceived = DateTime.now();
 
-      _calibration.addSample(activeProfile?.id, reading.rawVoltage);
+      _calibration.addSample(
+        activeProfile?.id,
+        reading.rawVoltage,
+        requireReference: requireReference,
+      );
       _updateVelocityHistory();
 
+      notifyListeners();
+    });
+
+    _batterySub = ble.batteryStream.listen((batt) {
+      lastBattery = batt;
       notifyListeners();
     });
   }
@@ -44,6 +53,7 @@ class FlowController extends ChangeNotifier {
   bool hapticsEnabled = true;
   bool soundEnabled = false;
   int maxHistory = 600;
+   bool requireReference = true;
 
   final List<VelocitySample> _history = [];
   List<VelocitySample> get history => List.unmodifiable(_history);
@@ -53,6 +63,7 @@ class FlowController extends ChangeNotifier {
 
   StreamSubscription<AppBleStatus>? _statusSub;
   StreamSubscription<FlowReading>? _readingSub;
+  StreamSubscription<int>? _batterySub;
 
   CalibrationStatus get calibrationStatus =>
       _calibration.statusForProfile(activeProfile?.id);
@@ -105,6 +116,13 @@ class FlowController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setRequireReference(bool value) {
+    requireReference = value;
+    _calibration.resetProfile(activeProfile?.id);
+    _calibratedVelocity = null;
+    notifyListeners();
+  }
+
   void resetCalibration() {
     _calibration.resetProfile(activeProfile?.id);
     _calibratedVelocity = null;
@@ -146,6 +164,7 @@ class FlowController extends ChangeNotifier {
   void dispose() {
     _statusSub?.cancel();
     _readingSub?.cancel();
+    _batterySub?.cancel();
     ble.dispose();
     super.dispose();
   }

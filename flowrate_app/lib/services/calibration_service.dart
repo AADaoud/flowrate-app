@@ -84,7 +84,8 @@ class CalibrationService {
     ).status;
   }
 
-  void addSample(String? profileId, double rawVoltage) {
+  void addSample(String? profileId, double rawVoltage,
+      {bool requireReference = true}) {
     if (profileId == null) return;
     final state = _states.putIfAbsent(
       profileId,
@@ -96,7 +97,7 @@ class CalibrationService {
         minSamples: minSamples,
       ),
     );
-    state.addSample(rawVoltage);
+    state.addSample(rawVoltage, requireReference: requireReference);
   }
 
   bool captureReference(String? profileId, double knownVelocity,
@@ -202,7 +203,7 @@ class _CalibrationState {
     return (countScore * 0.4) + (noiseScore * 0.35) + (driftScore * 0.25);
   }
 
-  void addSample(double rawVoltage) {
+  void addSample(double rawVoltage, {bool requireReference = true}) {
     final now = DateTime.now();
     _samples.add(_Sample(rawVoltage, now));
 
@@ -228,9 +229,20 @@ class _CalibrationState {
     if (stableNoise && stableDrift ||
         _stabilityScore > 0.82) {
       _baseline = _mean;
-      _phase = CalibrationPhase.waitingForReference;
-      _message =
-          "Baseline locked at ${_baseline!.toStringAsFixed(4)} V. Attach reference or hold known flow.";
+      if (requireReference) {
+        _phase = CalibrationPhase.waitingForReference;
+        _message =
+            "Baseline locked at ${_baseline!.toStringAsFixed(4)} V. Attach reference or hold known flow.";
+      } else {
+        _slope = 1;
+        _intercept = 0;
+        _referenceVelocity = 0;
+        _referenceVoltage = _baseline;
+        _referenceIsElectrical = false;
+        _phase = CalibrationPhase.calibrated;
+        _message =
+            "Baseline locked at ${_baseline!.toStringAsFixed(4)} V. Reference capture skipped.";
+      }
     } else {
       _message =
           "Waiting for stability (noise ${_noise.toStringAsFixed(4)} V, drift ${_drift.toStringAsFixed(4)} V)";

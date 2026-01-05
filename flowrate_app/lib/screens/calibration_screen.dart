@@ -18,6 +18,7 @@ class CalibrationScreen extends StatefulWidget {
 class _CalibrationScreenState extends State<CalibrationScreen> {
   double _referenceVelocity = 20;
   bool _electricalReference = false;
+  bool _requireReference = true;
   late final TextEditingController _refController;
   CalibrationPhase? _lastPhase;
 
@@ -421,22 +422,23 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              Column(
-                children: [
-                  Switch(
-                    value: _electricalReference,
-                    onChanged: (v) {
-                      setState(() => _electricalReference = v);
-                    },
-                    activeColor: Colors.tealAccent,
-                  ),
-                  Text(
-                    'Electrical\nreference',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
-                      fontSize: 11,
-                    ),
+                  Column(
+                    children: [
+                      Switch(
+                        value: _requireReference,
+                        onChanged: (v) {
+                          setState(() => _requireReference = v);
+                          widget.controller.setRequireReference(v);
+                        },
+                        activeColor: Colors.tealAccent,
+                      ),
+                      Text(
+                        'Require\nreference',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 11,
+                        ),
                   ),
                 ],
               ),
@@ -444,7 +446,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: hasProfile && waiting
+            onPressed: hasProfile && waiting && _requireReference
                 ? () {
                     final ok = widget.controller.captureReference(
                       _referenceVelocity,
@@ -481,7 +483,9 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
           else
             Text(
               hasProfile
-                  ? 'Tip: toggle the switch if you are injecting a known electrical bias instead of fluid flow.'
+                  ? _requireReference
+                      ? 'Tip: leave the switch on if you need a known reference; turn it off to accept baseline-only calibration.'
+                      : 'Reference capture is disabled — baseline-only calibration in use.'
                   : 'Select a setup profile before capturing a reference.',
               style: TextStyle(color: Colors.white.withOpacity(0.65)),
             ),
