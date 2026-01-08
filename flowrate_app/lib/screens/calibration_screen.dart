@@ -303,21 +303,27 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
             children: [
               const Icon(Icons.water_drop, color: Colors.lightBlueAccent),
               const SizedBox(width: 8),
-              const Text(
-                'Step 1 · Stabilize baseline',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+              Expanded( 
+                child: const Text(
+                  'Step 1 · Stabilize baseline',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
               if (calibration.baseline != null)
-                Text(
-                  'V₀ ${calibration.baseline!.toStringAsFixed(4)} V',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
+                Flexible(
+                  child: Text(
+                    'V₀ ${calibration.baseline!.toStringAsFixed(4)} V',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
             ],

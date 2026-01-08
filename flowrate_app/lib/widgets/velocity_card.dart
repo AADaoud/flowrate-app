@@ -34,6 +34,14 @@ class VelocityCard extends StatelessWidget {
     final clamped = displayVelocity.clamp(0, maxVelocity);
     final progress = (clamped / maxVelocity).clamp(0, 1.0);
     final colorScheme = Theme.of(context).colorScheme;
+        final clampedSamples = samples
+        .map((value) => value.isNaN ? 0.0 : value)
+        .map((value) => value < 0 ? 0.0 : value)
+        .toList(growable: false);
+    final maxSample = clampedSamples.isEmpty
+        ? 0.0
+        : clampedSamples.reduce((a, b) => a > b ? a : b);
+    final chartMaxY = maxSample > 0 ? maxSample * 1.2 : 1.0;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -223,11 +231,9 @@ class VelocityCard extends StatelessWidget {
             child: LineChart(
               LineChartData(
                 minY: 0,
-                maxY: samples.isEmpty
-                    ? 10
-                    : (samples.reduce((a, b) => a > b ? a : b) * 1.2),
+                maxY: clampedSamples.isEmpty ? 10 : chartMaxY,
                 minX: 0,
-                maxX: samples.isEmpty ? 1 : samples.length.toDouble(),
+                maxX: clampedSamples.isEmpty ? 1 : clampedSamples.length.toDouble(),
                 gridData: FlGridData(show: false),
                 borderData: FlBorderData(show: false),
                 titlesData: FlTitlesData(show: false),
@@ -235,8 +241,8 @@ class VelocityCard extends StatelessWidget {
                 lineBarsData: [
                   LineChartBarData(
                     spots: [
-                      for (int i = 0; i < samples.length; i++)
-                        FlSpot(i.toDouble(), samples[i]),
+                      for (int i = 0; i < clampedSamples.length; i++)
+                        FlSpot(i.toDouble(), clampedSamples[i]),
                     ],
                     isCurved: true,
                     color: colorScheme.primary,

@@ -31,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final FlowController _controller;
   Artboard? _artboard;
   SMIBool? _isFlowing;
+  StateMachineController? _riveController;
 
   bool _showDebugOverlay = false;
   FlowReading? _lastReadingFeedback;
@@ -79,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final controller = StateMachineController.fromArtboard(art, 'State Machine 1');
     if (controller != null) {
       art.addController(controller);
+      _riveController = controller;
       _isFlowing = controller.findInput<bool>('isFlowing') as SMIBool?;
       _isFlowing?.value = false;
     }
@@ -124,8 +126,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _updateFlowState(double velocity) {
-    if (_isFlowing == null) return;
-    _isFlowing!.value = velocity > 5;
+    if (_isFlowing == null || _riveController == null) return;
+    
+    // Set isFlowing to true when velocity > 5, false otherwise
+    final shouldFlow = velocity > 5;
+    
+    if (_isFlowing!.value != shouldFlow) {
+      _isFlowing!.value = shouldFlow;
+      
+      // Reset animation when stopping flow
+      if (!shouldFlow) {
+        // Force state machine to reset by re-initializing
+        _riveController!.isActive = false;
+        _riveController!.isActive = true;
+      }
+    }
   }
 
   @override
@@ -262,23 +277,23 @@ class _HomeScreenState extends State<HomeScreen> {
                       
                       // Rive Animation Card
                       Container(
-  height: 200,
-  decoration: BoxDecoration(
-    color: Colors.white.withOpacity(0.06),
-    borderRadius: BorderRadius.circular(20),
-    border: Border.all(color: Colors.white.withOpacity(0.08)),
-  ),
-  clipBehavior: Clip.antiAlias,
-  child: Padding(
-    padding: const EdgeInsets.only(top: 160), // 👈 shifts animation down
-    child: artboard == null
-        ? const Center(child: CircularProgressIndicator())
-        : Rive(
-            artboard: artboard,
-            fit: BoxFit.cover,
-          ),
-  ),
-),
+                        height: 200,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withOpacity(0.08)),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 160),
+                          child: artboard == null
+                              ? const Center(child: CircularProgressIndicator())
+                              : Rive(
+                                  artboard: artboard,
+                                  fit: BoxFit.cover,
+                                ),
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       
                       // Velocity Card

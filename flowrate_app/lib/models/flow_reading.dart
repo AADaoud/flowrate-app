@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 class FlowReading {
+  static const double voltageScaleFactor = 8.0;
   final double rawVoltage;
   final int battery;
   final int? rssi;
@@ -27,7 +28,7 @@ class FlowReading {
     final batteryValue = (map['b'] ?? map['battery'] ?? 0) as num;
 
     return FlowReading(
-      rawVoltage: voltageValue.toDouble(),
+      rawVoltage: voltageValue.toDouble() * voltageScaleFactor,
       battery: batteryValue.toInt().clamp(0, 100),
       rssi: rssi,
       raw: raw.isNotEmpty ? raw : jsonEncode(map),

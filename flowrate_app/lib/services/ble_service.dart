@@ -73,7 +73,7 @@ class BleVelocityService {
         _connect();
       }
     }, onError: (e) {
-      _emit(AppBleStatus(AppBleStage.error, "Scan error: $e"));
+      _emit(AppBleStatus(AppBleStage.error, "Scan Error. Try again."));
     });
   }
 

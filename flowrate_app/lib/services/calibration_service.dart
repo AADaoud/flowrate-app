@@ -1,4 +1,5 @@
 import 'dart:math';
+import '../models/setup_profile.dart';
 
 enum CalibrationPhase {
   uncalibrated,
@@ -55,6 +56,8 @@ class CalibrationStatus {
 
 class CalibrationService {
   final Map<String, _CalibrationState> _states = {};
+  final Map<String, SetupProfile> _profiles = {};
+
 
   // Ultra-fast calibration parameters
   final int minSamples = 3; // Just need a few samples for averaging
@@ -65,6 +68,11 @@ class CalibrationService {
   // Known pump characteristics
   final double pumpMinVelocity = 24.0; // cm/s
   final double pumpMaxVelocity = 40.0; // cm/s
+  
+  // ESP32 FIRMWARE BUG WORKAROUND
+  // ESP32 uses wrong LSB factor (±0.256V instead of ±2.048V)
+  // Multiply all incoming voltages by 8 to correct
+  final double esp32VoltageCorrection = 8.0;
 
   CalibrationStatus statusForProfile(String? profileId) {
     if (profileId == null) {
@@ -94,6 +102,10 @@ class CalibrationService {
   void addSample(String? profileId, double rawVoltage,
       {bool requireReference = true}) {
     if (profileId == null) return;
+    
+    // Apply ESP32 firmware correction
+    final correctedVoltage = rawVoltage * esp32VoltageCorrection;
+    
     final state = _states.putIfAbsent(
       profileId,
       () => _CalibrationState(
@@ -106,7 +118,11 @@ class CalibrationService {
         pumpMaxVelocity: pumpMaxVelocity,
       ),
     );
-    state.addSample(rawVoltage, requireReference: requireReference);
+    state.addSample(correctedVoltage, requireReference: requireReference);
+  }
+
+  void registerProfile(SetupProfile profile) {
+    _profiles[profile.id] = profile;
   }
 
   bool captureReference(String? profileId, double knownVelocity,
@@ -130,8 +146,52 @@ class CalibrationService {
 
   double? apply(String? profileId, double rawVoltage) {
     if (profileId == null) return null;
+    
+    // Apply ESP32 firmware correction
+    final correctedVoltage = rawVoltage * esp32VoltageCorrection;
+    
     final state = _states[profileId];
-    return state?.apply(rawVoltage);
+    final calibratedVelocity = state?.apply(correctedVoltage);
+    
+    if (calibratedVelocity == null) return null;
+    
+    // Apply profile-specific corrections AFTER calibration
+    final profile = _profiles[profileId];
+    if (profile == null) return calibratedVelocity;
+    
+    return _applyProfileCorrections(calibratedVelocity, profile);
+  }
+  
+  // Profile-aware corrections applied to final velocity
+  double _applyProfileCorrections(double velocity, SetupProfile profile) {
+    var corrected = velocity;
+    
+    // 1. Electrode type correction
+    // Wire electrodes typically have ~15% higher sensitivity than sheet
+    if (profile.electrodeType == ElectrodeType.pin) {
+      corrected *= 0.87; // Reduce by 15% to compensate
+    }
+    
+    // 2. Coupling mode correction
+    // Capacitive coupling attenuates DC component and low frequencies
+    if (profile.couplingMode == CouplingMode.capacitive) {
+      // AC coupling typically reduces apparent velocity by 5-10% for steady flow
+      corrected *= 1.08; // Boost to compensate for attenuation
+    }
+    
+    // 3. Magnet configuration correction
+    // More magnets = stronger field = higher voltage for same velocity
+    // Normalize to 16 magnets as baseline
+    final magnetFactor = profile.magnetCount / 16.0;
+    corrected /= magnetFactor;
+    
+    // 4. Magnet size correction
+    // Larger magnets = stronger field
+    // Normalize to 10mm as baseline
+    final sizeFactor = profile.magnetSizeMm / 10.0;
+    corrected /= sizeFactor;
+    
+    return corrected;
   }
 
   void resetProfile(String? profileId) {

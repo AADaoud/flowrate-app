@@ -153,6 +153,7 @@ class FlowController extends ChangeNotifier {
     profiles.add(profile);
     activeProfile = profile;
     _calibratedVelocity = null;
+     _calibration.registerProfile(profile);
     _calibration.resetProfile(profile.id);
     notifyListeners();
   }
@@ -161,6 +162,7 @@ class FlowController extends ChangeNotifier {
     final found = profiles.where((p) => p.id == profileId);
     if (found.isEmpty) return;
     activeProfile = found.first;
+    _calibration.registerProfile(found.first);
     _calibratedVelocity = null;
     notifyListeners();
   }
