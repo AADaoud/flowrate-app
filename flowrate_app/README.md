@@ -18,7 +18,7 @@ flutter run
 ## BLE protocol
 - Service UUID: `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
 - Notify characteristic UUID: `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
-- Notification payload: compact JSON under 20 bytes: `{"v":<velocity_cm_per_s>,"b":<battery_percent>}`
+- Notification payload: compact JSON under 20 bytes: `{"v":<raw_voltage_v>,"b":<battery_percent>}`
 
 ## ESP32 firmware
 The sample firmware in `esp32-code.cpp` uses NimBLE-Arduino (do **not** upgrade the library). It advertises as `ESP32-Flow` and streams the payload above roughly every 800 ms.
@@ -33,6 +33,12 @@ The sample firmware in `esp32-code.cpp` uses NimBLE-Arduino (do **not** upgrade 
 
 ### Battery smoothing
 Battery percent is low-pass filtered to avoid jitter. If using ADC, set the divider ratio and voltage window near the top of the file.
+
+### Calibration-first app behavior
+- The app now treats `v` as the raw ADS1115 A0-to-GND voltage. With nothing connected, expect ~0.0359 V due to floating bias and coupling.
+- Velocity is hidden until the app observes a stable baseline and you capture a known reference (electrical or flow).
+- Calibration is scoped to a **Setup Profile** (magnets, pipe diameter, electrode type, coupling mode, notes). Changing the profile immediately locks velocity until that profile is calibrated.
+- A calibration screen guides the wait-for-stability ➜ capture-reference ➜ operational flow and will re-lock velocity if noise or drift rises.
 
 ## Migration notes
 - BLE handling now streams typed `FlowReading` objects, keeps a bounded JSON buffer, and auto-reconnects with exponential-ish backoff.

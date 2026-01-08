@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import '../models/app_ble_status.dart';
 import '../models/flow_reading.dart';
+import '../models/setup_profile.dart';
 import '../models/velocity_sample.dart';
 import 'ble_service.dart';
+import 'calibration_service.dart';
 import 'velocity_filter.dart';
 
 class FlowController extends ChangeNotifier {
@@ -17,30 +20,45 @@ class FlowController extends ChangeNotifier {
     _readingSub = ble.readingStream.listen((reading) {
       latest = reading;
       _lastReadingReceived = DateTime.now();
-
-      if (loggingEnabled) {
-        final filtered = _filter.addSample(reading.velocity);
-        _history.add(VelocitySample(filtered));
-        if (_history.length > maxHistory) {
-          _history.removeAt(0);
-        }
+      if (kDebugMode) {
+        debugPrint(
+            '[FlowController] reading v=${reading.rawVoltage}V b=${reading.battery}% profile=${activeProfile?.id ?? "none"}');
       }
 
+      _calibration.addSample(
+        activeProfile?.id,
+        reading.rawVoltage,
+        requireReference: requireReference,
+      );
+      _updateVelocityHistory();
+
+      notifyListeners();
+    });
+
+    _batterySub = ble.batteryStream.listen((batt) {
+      lastBattery = batt;
       notifyListeners();
     });
   }
 
   final BleVelocityService ble;
   final VelocityFilter _filter = VelocityFilter(windowSize: 6);
+  final CalibrationService _calibration = CalibrationService();
 
   AppBleStatus status =
       AppBleStatus(AppBleStage.idle, 'Waiting to start BLE');
   FlowReading? latest;
+  double? _calibratedVelocity;
+  SetupProfile? activeProfile;
+  int? lastBattery;
+  final List<SetupProfile> profiles = [];
+
   bool loggingEnabled = true;
   bool devMode = false;
   bool hapticsEnabled = true;
   bool soundEnabled = false;
   int maxHistory = 600;
+   bool requireReference = true;
 
   final List<VelocitySample> _history = [];
   List<VelocitySample> get history => List.unmodifiable(_history);
@@ -50,6 +68,35 @@ class FlowController extends ChangeNotifier {
 
   StreamSubscription<AppBleStatus>? _statusSub;
   StreamSubscription<FlowReading>? _readingSub;
+  StreamSubscription<int>? _batterySub;
+
+  CalibrationStatus get calibrationStatus =>
+      _calibration.statusForProfile(activeProfile?.id);
+  double? get calibratedVelocity => _calibratedVelocity;
+  bool get hasProfile => activeProfile != null;
+  bool get calibrationMatchesProfile =>
+      hasProfile &&
+      calibrationStatus.profileId == activeProfile!.id &&
+      calibrationStatus.isOperational;
+
+  void _updateVelocityHistory() {
+    final sample = latest;
+    if (sample == null) return;
+
+    final velocity = _calibration.apply(activeProfile?.id, sample.rawVoltage);
+    _calibratedVelocity = velocity;
+    lastBattery = sample.battery;
+
+    if (loggingEnabled) {
+      final filtered = _filter.addSample(
+        velocity ?? sample.rawVoltage,
+      );
+      _history.add(VelocitySample(filtered));
+      if (_history.length > maxHistory) {
+        _history.removeAt(0);
+      }
+    }
+  }
 
   void startBle() => ble.startScan();
 
@@ -74,10 +121,55 @@ class FlowController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setRequireReference(bool value) {
+    requireReference = value;
+    _calibration.resetProfile(activeProfile?.id);
+    _calibratedVelocity = null;
+    notifyListeners();
+  }
+
+  void resetCalibration() {
+    _calibration.resetProfile(activeProfile?.id);
+    _calibratedVelocity = null;
+    notifyListeners();
+  }
+
+  bool captureReference(double knownVelocity,
+      {bool electricalReference = false}) {
+    final success = _calibration.captureReference(
+      activeProfile?.id,
+      knownVelocity,
+      electricalReference: electricalReference,
+    );
+    if (success && latest != null) {
+      _calibratedVelocity =
+          _calibration.apply(activeProfile?.id, latest!.rawVoltage);
+    }
+    notifyListeners();
+    return success;
+  }
+
+  void addProfile(SetupProfile profile) {
+    profiles.add(profile);
+    activeProfile = profile;
+    _calibratedVelocity = null;
+    _calibration.resetProfile(profile.id);
+    notifyListeners();
+  }
+
+  void selectProfile(String profileId) {
+    final found = profiles.where((p) => p.id == profileId);
+    if (found.isEmpty) return;
+    activeProfile = found.first;
+    _calibratedVelocity = null;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _statusSub?.cancel();
     _readingSub?.cancel();
+    _batterySub?.cancel();
     ble.dispose();
     super.dispose();
   }

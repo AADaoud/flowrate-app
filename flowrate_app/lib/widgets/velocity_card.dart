@@ -5,18 +5,33 @@ import 'package:flutter/material.dart' as m; // or any prefix you want
 class VelocityCard extends StatelessWidget {
   const VelocityCard({
     super.key,
-    required this.velocity,
+    required this.rawVoltage,
+    this.velocity,
     required this.samples,
+    required this.isCalibrated,
+    required this.statusText,
+    this.baseline,
+    this.noise,
+    this.drift,
+    this.confidence = 0,
     this.maxVelocity = 120,
   });
 
-  final double velocity;
+  final double rawVoltage;
+  final double? velocity;
   final double maxVelocity;
   final List<double> samples;
+  final bool isCalibrated;
+  final String statusText;
+  final double? baseline;
+  final double? noise;
+  final double? drift;
+  final double confidence;
 
   @override
   Widget build(BuildContext context) {
-    final clamped = velocity.clamp(0, maxVelocity);
+    final displayVelocity = velocity ?? 0;
+    final clamped = displayVelocity.clamp(0, maxVelocity);
     final progress = (clamped / maxVelocity).clamp(0, 1.0);
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -46,16 +61,29 @@ class VelocityCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: colorScheme.primary.withOpacity(0.14),
+                  color: isCalibrated
+                      ? colorScheme.primary.withOpacity(0.14)
+                      : Colors.orange.withOpacity(0.16),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
-                  'Velocity',
-                  style: TextStyle(
-                    fontSize: 14,
-                    letterSpacing: 0.2,
-                    fontWeight: FontWeight.w600,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isCalibrated ? Icons.check_circle : Icons.lock_clock,
+                      size: 16,
+                      color: isCalibrated ? colorScheme.primary : Colors.orange,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isCalibrated ? 'Calibrated' : 'Calibration required',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        letterSpacing: 0.2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const Spacer(),
@@ -68,17 +96,53 @@ class VelocityCard extends StatelessWidget {
                 width: 10,
                 height: 10,
                 decoration: BoxDecoration(
-                  color: Colors.greenAccent,
+                  color: isCalibrated ? Colors.greenAccent : Colors.orangeAccent,
                   borderRadius: BorderRadius.circular(6),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.greenAccent.withOpacity(0.6),
+                      color: (isCalibrated
+                              ? Colors.greenAccent
+                              : Colors.orangeAccent)
+                          .withOpacity(0.6),
                       blurRadius: 10,
                       spreadRadius: 1,
                     ),
                   ],
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              statusText,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.72),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Text(
+                'Raw: ${rawVoltage.toStringAsFixed(4)} V',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              if (baseline != null)
+                Text(
+                  'Baseline ${baseline!.toStringAsFixed(4)} V',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.6),
+                    fontSize: 12,
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -112,21 +176,38 @@ class VelocityCard extends StatelessWidget {
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          velocity.toStringAsFixed(1),
-                          style: const TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 52,
-                            fontWeight: FontWeight.w700,
+                        if (isCalibrated && velocity != null) ...[
+                          Text(
+                            velocity!.toStringAsFixed(1),
+                            style: const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 52,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'cm/s',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
-                            fontSize: 16,
+                          Text(
+                            'cm/s',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 16,
+                            ),
                           ),
-                        ),
+                        ] else ...[
+                          const Icon(
+                            Icons.lock_outline,
+                            size: 38,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Calibrate to unlock velocity',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.72),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ],
@@ -135,16 +216,7 @@ class VelocityCard extends StatelessWidget {
             },
           ),
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Recent trend',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
+          _diagnosticsRow(),
           const SizedBox(height: 12),
           SizedBox(
             height: 80,
@@ -181,6 +253,48 @@ class VelocityCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _diagnosticsRow() {
+    return Row(
+      children: [
+        Flexible(
+          child: Text(
+            isCalibrated ? 'Recent trend' : 'Profiling baseline',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.7),
+              fontWeight: FontWeight.w600,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        if (noise != null)
+          Flexible(
+            child: Text(
+              'Noise ${noise!.toStringAsFixed(4)} V',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        if (drift != null) ...[
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              'Drift ${drift!.toStringAsFixed(4)} V',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

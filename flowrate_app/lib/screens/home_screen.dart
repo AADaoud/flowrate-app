@@ -8,6 +8,7 @@ import '../models/app_ble_status.dart';
 import '../models/flow_reading.dart';
 import '../models/velocity_sample.dart';
 import '../services/ble_service.dart';
+import '../services/calibration_service.dart';
 import '../services/flow_controller.dart';
 import '../widgets/battery_chip.dart';
 import '../widgets/ble_status_bar.dart';
@@ -16,6 +17,7 @@ import '../widgets/velocity_card.dart';
 import 'calibration_screen.dart';
 import 'device_info_screen.dart';
 import 'history_screen.dart';
+import 'setup_profile_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -90,7 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final reading = _controller.latest;
 
     if (reading != null) {
-      _updateFlowState(reading.velocity);
+      _updateFlowState(_controller.calibratedVelocity ?? 0);
       if (_controller.hapticsEnabled &&
           (_lastReadingFeedback?.timestamp != reading.timestamp)) {
         HapticFeedback.selectionClick();
@@ -103,10 +105,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (status.stage != _lastStage) {
-      if (_controller.hapticsEnabled && status.stage == AppBleStage.connected) {
-        HapticFeedback.mediumImpact();
-      } else if (_controller.hapticsEnabled && status.stage == AppBleStage.error) {
-        HapticFeedback.vibrate();
+      if (_controller.hapticsEnabled) {
+        if (status.stage == AppBleStage.connected) {
+          HapticFeedback.mediumImpact();
+        } else if (status.stage == AppBleStage.disconnected) {
+          HapticFeedback.selectionClick();
+        } else if (status.stage == AppBleStage.error) {
+          HapticFeedback.vibrate();
+        }
       }
       if (_controller.soundEnabled && status.stage == AppBleStage.connected) {
         SystemSound.play(SystemSoundType.alert);
@@ -144,7 +150,9 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => const CalibrationScreen(),
+        builder: (_) => CalibrationScreen(
+          controller: _controller,
+        ),
       ),
     );
   }
@@ -186,6 +194,15 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _openSetupProfiles() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SetupProfileScreen(controller: _controller),
+      ),
+    );
+  }
+
   List<double> _sparkline() {
     if (_controller.history.isEmpty) return [];
     final history = _controller.history;
@@ -200,9 +217,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final artboard = _artboard;
     final reading = _controller.latest;
-    final velocity = reading?.velocity ?? 0;
-    final battery = reading?.battery;
+    final calibration = _controller.calibrationStatus;
+    final velocity = _controller.calibratedVelocity;
+    final isCalibrated = _controller.calibrationMatchesProfile;
+    final rawVoltage = reading?.rawVoltage ?? 0;
+    final battery = reading?.battery ?? _controller.lastBattery;
     final status = _controller.status;
+    final profileLabel = _controller.activeProfile?.label ?? 'None';
+    final statusText = !_controller.hasProfile
+        ? 'Select setup profile first'
+        : (!isCalibrated
+            ? 'Calibration required for current setup profile'
+            : (calibration.message ??
+                'Calibrated profile active for this setup'));
 
     return Scaffold(
       body: SafeArea(
@@ -256,8 +283,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       
                       // Velocity Card
                       VelocityCard(
+                        rawVoltage: rawVoltage,
                         velocity: velocity,
                         samples: _sparkline(),
+                        isCalibrated: _controller.calibrationMatchesProfile,
+                        statusText: statusText,
+                        baseline: calibration.baseline,
+                        noise: calibration.noise,
+                        drift: calibration.drift,
                       ),
                       const SizedBox(height: 16),
                       
@@ -292,6 +325,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         spacing: 12,
                         runSpacing: 12,
                         children: [
+                          _chipAction(
+                            icon: Icons.settings_input_component,
+                            label: 'Setup profile',
+                            onTap: _openSetupProfiles,
+                          ),
                           _chipAction(
                             icon: Icons.refresh,
                             label: 'Rescan',
@@ -357,6 +395,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       deviceName: _controller.ble.device?.name ?? 'Unknown',
                       deviceId: _controller.ble.device?.id ?? '-',
                       velocity: velocity,
+                      rawVoltage: rawVoltage,
+                      calibrated: isCalibrated,
+                      profileLabel: profileLabel,
                       battery: battery,
                       rssi: _controller.ble.lastRssi,
                       lastStatus: status.toString(),

@@ -1,14 +1,14 @@
 import 'dart:convert';
 
 class FlowReading {
-  final double velocity;
+  final double rawVoltage;
   final int battery;
   final int? rssi;
   final DateTime timestamp;
   final String raw;
 
   FlowReading({
-    required this.velocity,
+    required this.rawVoltage,
     required this.battery,
     this.rssi,
     required this.timestamp,
@@ -22,11 +22,12 @@ class FlowReading {
 
   factory FlowReading.fromMap(Map<String, dynamic> map,
       {String raw = '', int? rssi}) {
-    final velocityValue = (map['v'] ?? map['velocity'] ?? 0) as num;
+    final voltageValue = (map['v'] ?? map['voltage'] ?? map['velocity'] ?? 0)
+        as num;
     final batteryValue = (map['b'] ?? map['battery'] ?? 0) as num;
 
     return FlowReading(
-      velocity: velocityValue.toDouble(),
+      rawVoltage: voltageValue.toDouble(),
       battery: batteryValue.toInt().clamp(0, 100),
       rssi: rssi,
       raw: raw.isNotEmpty ? raw : jsonEncode(map),

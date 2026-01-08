@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 class DebugOverlay extends StatelessWidget {
   final String deviceName;
   final String deviceId;
-  final double velocity;
+  final double rawVoltage;
+  final double? velocity;
+  final bool calibrated;
+  final String profileLabel;
   final int? battery;
   final int? rssi;
   final String lastStatus;
@@ -13,7 +16,10 @@ class DebugOverlay extends StatelessWidget {
     super.key,
     required this.deviceName,
     required this.deviceId,
+    required this.rawVoltage,
     required this.velocity,
+    required this.calibrated,
+    required this.profileLabel,
     required this.battery,
     required this.rssi,
     required this.lastStatus,
@@ -49,7 +55,10 @@ class DebugOverlay extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text('Device: $deviceName'),
                 Text('ID: $deviceId'),
-                Text('Velocity: ${velocity.toStringAsFixed(2)} cm/s'),
+                Text(
+                    'Velocity: ${calibrated && velocity != null ? velocity!.toStringAsFixed(2) : "LOCKED"}'),
+                Text('Raw: ${rawVoltage.toStringAsFixed(4)} V'),
+                Text('Profile: $profileLabel'),
                 Text('Battery: ${battery ?? 0}%'),
                 Text('RSSI: ${rssi ?? 0} dBm'),
                 Text('Status: $lastStatus'),

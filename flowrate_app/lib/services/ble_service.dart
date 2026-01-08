@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
 import '../models/app_ble_status.dart';
@@ -10,7 +11,7 @@ import '../models/flow_reading.dart';
 /// Features:
 /// - Scans for ESP32-Flow device by advertised name or service UUID.
 /// - Handles BLE <20-byte JSON packets safely and reassembles full messages.
-/// - Emits FlowReading objects for velocity + battery.
+/// - Emits FlowReading objects for raw voltage + battery.
 /// - Provides clean status stream for UI.
 /// - Performs periodic RSSI polling (since rssiStream() was removed).
 /// - Automatic reconnection with exponential backoff.
@@ -32,9 +33,6 @@ class BleVelocityService {
 
   final _readingController = StreamController<FlowReading>.broadcast();
   Stream<FlowReading> get readingStream => _readingController.stream;
-
-  final _velocityController = StreamController<double>.broadcast();
-  Stream<double> get velocityStream => _velocityController.stream;
 
   final _batteryController = StreamController<int>.broadcast();
   Stream<int> get batteryStream => _batteryController.stream;
@@ -230,8 +228,11 @@ class BleVelocityService {
 
         try {
           final reading = FlowReading.fromPayload(jsonStr, rssi: lastRssi);
+          if (kDebugMode) {
+            debugPrint(
+                '[BLE] payload parsed v=${reading.rawVoltage}V b=${reading.battery}% rssi=$lastRssi');
+          }
           _readingController.add(reading);
-          _velocityController.add(reading.velocity);
           _batteryController.add(reading.battery);
         } catch (e) {
           _emit(AppBleStatus(AppBleStage.error, "Payload error: $e"));
@@ -280,7 +281,6 @@ class BleVelocityService {
 
     _statusController.close();
     _readingController.close();
-    _velocityController.close();
     _batteryController.close();
   }
 }
