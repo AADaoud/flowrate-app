@@ -360,27 +360,41 @@ class HistoryScreen extends StatelessWidget {
   }
 
   List<FlSpot> _buildPoints() {
-    if (samples.isEmpty) return [];
-    final start = samples.first.timestamp.millisecondsSinceEpoch.toDouble();
+  if (samples.isEmpty) return [];
 
-    return samples.map((s) {
-      final t = (s.timestamp.millisecondsSinceEpoch.toDouble() - start) / 1000.0;
-      return FlSpot(t, s.value);
-    }).toList();
-  }
+  final start = samples.first.timestamp.millisecondsSinceEpoch.toDouble();
+
+  return samples.map((s) {
+    final t =
+        (s.timestamp.millisecondsSinceEpoch.toDouble() - start) / 1000.0;
+
+    final clampedValue = s.value < 0 ? 0.0 : s.value;
+
+    return FlSpot(t, clampedValue);
+  }).toList();
+}
+
 
   Map<String, double> _calculateStats() {
-    if (samples.isEmpty) {
-      return {'min': 0, 'max': 0, 'avg': 0};
-    }
-
-    final values = samples.map((s) => s.value).toList();
-    final min = values.reduce((a, b) => a < b ? a : b);
-    final max = values.reduce((a, b) => a > b ? a : b);
-    final avg = values.reduce((a, b) => a + b) / values.length;
-
-    return {'min': min, 'max': max, 'avg': avg};
+  if (samples.isEmpty) {
+    return {'min': 0, 'max': 0, 'avg': 0};
   }
+
+  final values = samples
+      .map((s) => s.value < 0 ? 0.0 : s.value)
+      .toList();
+
+  final min = values.reduce((a, b) => a < b ? a : b);
+  final max = values.reduce((a, b) => a > b ? a : b);
+  final avg = values.reduce((a, b) => a + b) / values.length;
+
+  return {
+    'min': min,
+    'max': max,
+    'avg': avg,
+  };
+}
+
 }
 
 class _StatCard extends StatelessWidget {
