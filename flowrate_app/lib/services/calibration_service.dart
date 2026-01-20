@@ -66,8 +66,8 @@ class CalibrationService {
   final Duration window = const Duration(seconds: 5);
   
   // Known pump characteristics
-  final double pumpMinVelocity = 24.0; // cm/s
-  final double pumpMaxVelocity = 40.0; // cm/s
+  double pumpMinVelocity = 24.0; // cm/s
+  double pumpMaxVelocity = 40.0; // cm/s
   
   // ESP32 FIRMWARE BUG WORKAROUND
   // ESP32 uses wrong LSB factor (±0.256V instead of ±2.048V)
@@ -119,6 +119,14 @@ class CalibrationService {
       ),
     );
     state.addSample(correctedVoltage, requireReference: requireReference);
+  }
+
+  void updateVelocityRange(double minVelocity, double maxVelocity) {
+    pumpMinVelocity = minVelocity;
+    pumpMaxVelocity = maxVelocity;
+    for (final state in _states.values) {
+      state.updatePumpRange(minVelocity, maxVelocity);
+    }
   }
 
   void registerProfile(SetupProfile profile) {
@@ -224,8 +232,8 @@ class _CalibrationState {
   final double targetDrift;
   final Duration window;
   final int minSamples;
-  final double pumpMinVelocity;
-  final double pumpMaxVelocity;
+  double pumpMinVelocity;
+  double pumpMaxVelocity;
 
   final List<_Sample> _samples = [];
 
@@ -306,7 +314,7 @@ class _CalibrationState {
     if (requireReference) {
       _phase = CalibrationPhase.waitingForReference;
       _message =
-          "Ready for reference. Turn on pump (24-40 cm/s).";
+          "Ready for reference. Turn on pump (${pumpMinVelocity.toStringAsFixed(0)}-${pumpMaxVelocity.toStringAsFixed(0)} cm/s).";
     } else {
       _slope = 1;
       _intercept = 0;
@@ -335,8 +343,10 @@ class _CalibrationState {
     }
 
     // Check if velocity is within pump's expected range
-    if (knownVelocity < pumpMinVelocity - 2 || knownVelocity > pumpMaxVelocity + 2) {
-      _message = "Velocity ${knownVelocity.toStringAsFixed(1)} cm/s outside pump range (${pumpMinVelocity.toInt()}-${pumpMaxVelocity.toInt()} cm/s).";
+    if (knownVelocity < pumpMinVelocity - 2 ||
+        knownVelocity > pumpMaxVelocity + 2) {
+      _message =
+          "Velocity ${knownVelocity.toStringAsFixed(1)} cm/s outside pump range (${pumpMinVelocity.toInt()}-${pumpMaxVelocity.toInt()} cm/s).";
       return false;
     }
 
@@ -373,6 +383,11 @@ class _CalibrationState {
   }
 
   double? apply(double rawVoltage) => status.apply(rawVoltage);
+
+  void updatePumpRange(double minVelocity, double maxVelocity) {
+    pumpMinVelocity = minVelocity;
+    pumpMaxVelocity = maxVelocity;
+  }
 }
 
 class _Sample {

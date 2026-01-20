@@ -181,10 +181,24 @@ class _HomeScreenState extends State<HomeScreen> {
           devMode: _controller.devMode,
           hapticsEnabled: _controller.hapticsEnabled,
           soundEnabled: _controller.soundEnabled,
+          voltageMin: _controller.voltageMin,
+          voltageMax: _controller.voltageMax,
+          velocityMin: _controller.velocityMin,
+          velocityMax: _controller.velocityMax,
+          invertPolarity: _controller.invertPolarity,
           onLoggingChanged: (v) => _controller.toggleLogging(v),
           onDevModeChanged: (v) => _controller.setDevMode(v),
           onHapticsChanged: (v) => _controller.setHaptics(v),
           onSoundChanged: (v) => _controller.setSound(v),
+          onVoltageRangeChanged: (range) => _controller.setVoltageRange(
+            min: range.$1,
+            max: range.$2,
+          ),
+          onVelocityRangeChanged: (range) => _controller.setVelocityRange(
+            min: range.$1,
+            max: range.$2,
+          ),
+          onPolarityChanged: (v) => _controller.setInvertPolarity(v),
         ),
       ),
     );
@@ -235,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final calibration = _controller.calibrationStatus;
     final velocity = _controller.calibratedVelocity;
     final isCalibrated = _controller.calibrationMatchesProfile;
-    final rawVoltage = reading?.rawVoltage ?? 0;
+    final rawVoltage = _controller.adjustedVoltage ?? 0;
     final battery = reading?.battery ?? _controller.lastBattery;
     final status = _controller.status;
     final profileLabel = _controller.activeProfile?.label ?? 'None';
@@ -300,6 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       VelocityCard(
                         rawVoltage: rawVoltage,
                         velocity: velocity,
+                        maxVelocity: _controller.velocityMax,
                         samples: _sparkline(),
                         isCalibrated: _controller.calibrationMatchesProfile,
                         statusText: statusText,

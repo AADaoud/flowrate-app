@@ -52,7 +52,7 @@ class _CalibrationScreenState extends State<CalibrationScreen> {
   Widget build(BuildContext context) {
     final calibration = widget.controller.calibrationStatus;
     final latest = widget.controller.latest;
-    final rawVoltage = latest?.rawVoltage ?? 0;
+    final rawVoltage = widget.controller.adjustedVoltage ?? 0;
     final hasProfile = widget.controller.activeProfile != null;
     final profile = widget.controller.activeProfile;
 

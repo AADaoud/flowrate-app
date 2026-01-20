@@ -25,12 +25,14 @@ class FlowController extends ChangeNotifier {
             '[FlowController] reading v=${reading.rawVoltage}V b=${reading.battery}% profile=${activeProfile?.id ?? "none"}');
       }
 
+      final adjustedVoltage = _applyVoltageSettings(reading.rawVoltage);
+      _adjustedVoltage = adjustedVoltage;
       _calibration.addSample(
         activeProfile?.id,
-        reading.rawVoltage,
+        adjustedVoltage,
         requireReference: requireReference,
       );
-      _updateVelocityHistory();
+      _updateVelocityHistory(adjustedVoltage);
 
       notifyListeners();
     });
@@ -58,10 +60,17 @@ class FlowController extends ChangeNotifier {
   bool hapticsEnabled = true;
   bool soundEnabled = false;
   int maxHistory = 600;
-   bool requireReference = true;
+  bool requireReference = true;
+  double voltageMin = 0.0;
+  double voltageMax = 2.24;
+  double velocityMin = 24.0;
+  double velocityMax = 40.0;
+  bool invertPolarity = false;
 
   final List<VelocitySample> _history = [];
   List<VelocitySample> get history => List.unmodifiable(_history);
+  double? _adjustedVoltage;
+  double? get adjustedVoltage => _adjustedVoltage;
 
   DateTime? _lastReadingReceived;
   DateTime? get lastReadingReceived => _lastReadingReceived;
@@ -79,17 +88,17 @@ class FlowController extends ChangeNotifier {
       calibrationStatus.profileId == activeProfile!.id &&
       calibrationStatus.isOperational;
 
-  void _updateVelocityHistory() {
+  void _updateVelocityHistory(double adjustedVoltage) {
     final sample = latest;
     if (sample == null) return;
 
-    final velocity = _calibration.apply(activeProfile?.id, sample.rawVoltage);
-    _calibratedVelocity = velocity;
+    final velocity = _calibration.apply(activeProfile?.id, adjustedVoltage);
+    _calibratedVelocity = velocity == null ? null : _clampVelocity(velocity);
     lastBattery = sample.battery;
 
     if (loggingEnabled) {
       final filtered = _filter.addSample(
-        velocity ?? sample.rawVoltage,
+        _calibratedVelocity ?? adjustedVoltage,
       );
       _history.add(VelocitySample(filtered));
       if (_history.length > maxHistory) {
@@ -121,6 +130,43 @@ class FlowController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setVoltageRange({required double min, required double max}) {
+    final normalized = _normalizeRange(min, max);
+    voltageMin = normalized.$1;
+    voltageMax = normalized.$2;
+    if (latest != null) {
+      final adjusted = _applyVoltageSettings(latest!.rawVoltage);
+      _adjustedVoltage = adjusted;
+      final recalculated = _calibration.apply(activeProfile?.id, adjusted);
+      _calibratedVelocity =
+          recalculated == null ? null : _clampVelocity(recalculated);
+    }
+    notifyListeners();
+  }
+
+  void setVelocityRange({required double min, required double max}) {
+    final normalized = _normalizeRange(min, max);
+    velocityMin = normalized.$1;
+    velocityMax = normalized.$2;
+    _calibration.updateVelocityRange(velocityMin, velocityMax);
+    if (_calibratedVelocity != null) {
+      _calibratedVelocity = _clampVelocity(_calibratedVelocity!);
+    }
+    notifyListeners();
+  }
+
+  void setInvertPolarity(bool value) {
+    invertPolarity = value;
+    if (latest != null) {
+      final adjusted = _applyVoltageSettings(latest!.rawVoltage);
+      _adjustedVoltage = adjusted;
+      final recalculated = _calibration.apply(activeProfile?.id, adjusted);
+      _calibratedVelocity =
+          recalculated == null ? null : _clampVelocity(recalculated);
+    }
+    notifyListeners();
+  }
+
   void setRequireReference(bool value) {
     requireReference = value;
     _calibration.resetProfile(activeProfile?.id);
@@ -142,8 +188,11 @@ class FlowController extends ChangeNotifier {
       electricalReference: electricalReference,
     );
     if (success && latest != null) {
+      final adjusted = _applyVoltageSettings(latest!.rawVoltage);
+      _adjustedVoltage = adjusted;
+      final recalculated = _calibration.apply(activeProfile?.id, adjusted);
       _calibratedVelocity =
-          _calibration.apply(activeProfile?.id, latest!.rawVoltage);
+          recalculated == null ? null : _clampVelocity(recalculated);
     }
     notifyListeners();
     return success;
@@ -153,7 +202,7 @@ class FlowController extends ChangeNotifier {
     profiles.add(profile);
     activeProfile = profile;
     _calibratedVelocity = null;
-     _calibration.registerProfile(profile);
+    _calibration.registerProfile(profile);
     _calibration.resetProfile(profile.id);
     notifyListeners();
   }
@@ -165,6 +214,20 @@ class FlowController extends ChangeNotifier {
     _calibration.registerProfile(found.first);
     _calibratedVelocity = null;
     notifyListeners();
+  }
+
+  double _applyVoltageSettings(double rawVoltage) {
+    final polarityAdjusted = invertPolarity ? -rawVoltage : rawVoltage;
+    return polarityAdjusted.clamp(voltageMin, voltageMax).toDouble();
+  }
+
+  double _clampVelocity(double velocity) {
+    return velocity.clamp(velocityMin, velocityMax).toDouble();
+  }
+
+  (double, double) _normalizeRange(double min, double max) {
+    if (min <= max) return (min, max);
+    return (max, min);
   }
 
   @override
